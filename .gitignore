@@ -4,7 +4,10 @@ __pycache__/
 *$py.class
 
 
-*/lightning_logs/
+lightning_logs/
+
+*.parquet
+*.png
 
 # C extensions
 *.so
