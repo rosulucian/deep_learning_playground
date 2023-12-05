@@ -1,6 +1,67 @@
 import torch
 import numpy as np
 
+from tokenizers import (
+    decoders,
+    models,
+    normalizers,
+    pre_tokenizers,
+    processors,
+    trainers,
+    Tokenizer,
+)
+
+class RNA_Token_Dataset(torch.utils.data.Dataset):
+    def __init__(self, df, Lmax, 
+                 # tokenizer,
+                 tok_file='tokenizer.json', 
+                 **kwargs):
+        
+        # self.tokenizer = tokenizer
+        self.tokenizer = Tokenizer.from_file(tok_file)
+        self.mask_token = self.tokenizer.token_to_id("[MASK]")
+        
+        self.Lmax = Lmax + 1
+        
+        self.seq = df['sequence'].values
+        self.L = df['L'].values
+        
+    def __len__(self):
+        return len(self.seq)
+        
+    def __getitem__(self, idx):
+        seq = self.seq[idx]
+        
+        encoding = self.tokenizer.encode(seq)
+        
+        # seq = torch.IntTensor(encoding.ids)
+        
+        att_mask = torch.zeros(self.Lmax, dtype=torch.bool)
+        att_mask[:len(encoding.ids)] = True
+        
+        encoding.pad(self.Lmax)
+        
+        seq = torch.IntTensor(encoding.ids)
+
+        rand = torch.rand(att_mask.sum())
+        mask_arr = rand < 0.15
+        
+        selection = torch.flatten((mask_arr).nonzero()).tolist()
+        
+        mlm = seq.detach().clone()
+        mlm[selection] = self.mask_token
+        
+        # true when token is masked 
+        token_mask = mlm == self.mask_token
+        
+        # set all to 0 except mask
+        mlm_target = seq.masked_fill(~token_mask, 0)
+        
+        inputs = {'seq': mlm, 'att_mask': att_mask}
+        targets = {'labels': seq, 'token_mask': token_mask, 'mlm_target': mlm_target.long()}
+        
+        return inputs, targets
+
 class RNA_Dataset(torch.utils.data.Dataset):
     def __init__(self, df, Lmax, v, seed,  mode='train',
                  nsp=False, sep='S', kmers=False, **kwargs):
