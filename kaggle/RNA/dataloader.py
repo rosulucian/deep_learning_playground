@@ -3,7 +3,7 @@ import numpy as np
 
 class RNA_Dataset(torch.utils.data.Dataset):
     def __init__(self, df, Lmax, v, seed,  mode='train',
-                 nsp=False, sep='S', **kwargs):
+                 nsp=False, sep='S', kmers=False, **kwargs):
         
         self.seq_map = v
         self.Lmax = Lmax + 1
@@ -13,6 +13,7 @@ class RNA_Dataset(torch.utils.data.Dataset):
         
         self.nsp = nsp
         self.sep = sep
+        self.kmers = kmers
         
     def __len__(self):
         return len(self.seq)
@@ -24,20 +25,25 @@ class RNA_Dataset(torch.utils.data.Dataset):
         # isnext = True
         nsp_target = [1, 0]
         
-        # get another rand seq
+        
         if torch.rand(1) < 0.5:
             # isnext = False
             nsp_target = [0, 1]
             
+            # get another rand seq
             idx = np.random.choice(len(self.seq))
             other = self.seq[idx]
 
             max_len = max(len(seq), len(other))
             sep_idx = max_len // 2
             
-            nsp = seq[:sep_idx] + self.sep + other[sep_idx:]
+            nsp = seq[:sep_idx] + other[sep_idx:]
         else:
-            nsp = seq[:sep_idx] + self.sep + seq[sep_idx:]
+            nsp = seq
+            
+        #     nsp = seq[:sep_idx] + self.sep + other[sep_idx:]
+        # else:
+        #     nsp = seq[:sep_idx] + self.sep + seq[sep_idx:]
         
         return nsp, sep_idx, torch.Tensor(nsp_target)
         
@@ -47,25 +53,27 @@ class RNA_Dataset(torch.utils.data.Dataset):
         if self.nsp:
             seq, sep_idx, nsp_target = self.get_nsp(seq)
         
+        if self.kmers:
+            seq = [seq[i:i+3] for i in range(len(seq)-2)]
+        
+        seq = [self.seq_map[s] for s in seq]
+        if self.nsp:
+            seq.insert(sep_idx, self.seq_map[self.sep])
+        
+        seq = np.array(seq)        
+        # seq = np.pad(seq, (0, self.Lmax - len(seq)))
+        
         mask = torch.zeros(self.Lmax, dtype=torch.bool)
         mask[:len(seq)] = True
         
-        # if len(seq) >= self.Lmax:
-        #     print(len(seq))
-        #     print(seq)
-        
-        seq = [self.seq_map[s] for s in seq]
-        seq = np.array(seq)        
         seq = np.pad(seq, (0, self.Lmax - len(seq)))
-        seq = torch.from_numpy(seq)
         
         rand = torch.rand(mask.sum())
         mask_arr = rand < 0.15
         
-        # print(rand.shape)
-        
         selection = torch.flatten((mask_arr).nonzero()).tolist()
         
+        seq = torch.from_numpy(seq)
         mlm = seq.detach().clone()
         mlm[selection] = self.seq_map['M']
         
@@ -79,7 +87,7 @@ class RNA_Dataset(torch.utils.data.Dataset):
         targets = {'labels': seq, 'token_mask': token_mask, 'mlm_target': mlm_target.long()}
         
         if self.nsp:
-            mlm[sep_idx] = self.seq_map['S']
+            # mlm[sep_idx] = self.seq_map['S']
             targets["nsp_target"] = nsp_target
         
         return inputs, targets
