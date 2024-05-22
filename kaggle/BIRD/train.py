@@ -17,25 +17,29 @@
 # %autoreload 2
 
 # %%
+import os
 import time
-import random # for torch seed
-import os # for torch seed
+import wandb
+import torch
+import random
 import pickle
 import imageio
 import librosa
+import torchvision
 
 import numpy as np
 import pandas as pd
+import torchmetrics as tm 
+import plotly.express as px
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 
-from sklearn.model_selection import train_test_split
-
-import torch
 from torch import nn
 from pathlib import Path
+from IPython.display import Audio
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, AdamW, RMSprop # optmizers
+from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau # Learning rate schedulers
 
 import albumentations as A
@@ -46,6 +50,12 @@ import timm
 # %%
 print('timm version', timm.__version__)
 print('torch version', torch.__version__)
+
+# %%
+# print(os.getenv('wandb_api_key'))
+
+# %%
+wandb.login(key=os.getenv('wandb_api_key'))
 
 # %%
 # detect and define device 
@@ -64,28 +74,23 @@ train_dir = Path('E:\data\BirdCLEF')
 class CFG:
     DEBUG = False # True False
 
-    # Horizontal melspectrogram resolution
-    MELSPEC_H = 128
     # Competition Root Folder
     ROOT_FOLDER = train_dir
     AUDIO_FOLDER = train_dir / 'train_audio'
     DATA_DIR = train_dir / 'spectros'
     TRAN_CSV = train_dir / 'train_metadata.csv'
+    RESULTS_DIR = train_dir / 'results'
+    CKPT_DIR = train_dir / 'ckpt'
 
-    num_workers = 4
+    num_workers = 12
     # Maximum decibel to clip audio to
     TOP_DB = 100
     # Minimum rating
     MIN_RATING = 3.0
     # Sample rate as provided in competition description
     SR = 32000
-    N_FFT = 2048
-    HOP_LENGTH = 512
 
-    ### input: not configurable
-    IMG_HEIGHT = 28
-    IMG_WIDTH = 28
-    # N_CLASS = len(np.unique(train['label']))
+    image_size = 256
     
     ### split train and validation sets
     split_fraction = 0.95
@@ -94,9 +99,10 @@ class CFG:
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 ...  
     
     ### training
-    print_freq = 100
-    BATCH_SIZE = 256
-    N_EPOCHS = 3 if DEBUG else 40
+    BATCH_SIZE = 64
+    # N_EPOCHS = 3 if DEBUG else 40
+    N_EPOCHS = 2
+    LEARNING_RATE = 1e-3
     
     ### set only one to True
     save_best_loss = False
@@ -107,9 +113,7 @@ class CFG:
     # optimizer = 'adamw'
     optimizer = 'rmsprop'
     
-    LEARNING_RATE = 1e-3
-    
-    weight_decay = 0.1 # for adamw
+    weight_decay = 1e-6 # for adamw
     l2_penalty = 0.01 # for RMSprop
     rms_momentum = 0 # for RMSprop
     
@@ -121,12 +125,37 @@ class CFG:
     cosine_T_max = 4
     cosine_eta_min = 1e-8
     verbose = True
-    
-    ### albumentations
-    probability = 0.6
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     random_seed = 42
 
+    comment = 'first'
+
+mel_spec_params = {
+    "sample_rate": CFG.SR,
+    "n_mels": 128,
+    "f_min": 20,
+    "f_max": CFG.SR / 2,
+    "n_fft": 2048,
+    "hop_length": 512,
+    "normalized": True,
+    "center" : True,
+    "pad_mode" : "constant",
+    "norm" : "slaney",
+    "mel_scale" : "slaney"
+}
+
+CFG.mel_spec_params = mel_spec_params
+
+sample_submission = pd.read_csv(train_dir / 'sample_submission.csv')
+
+# Set labels
+CFG.LABELS = sample_submission.columns[1:]
+CFG.N_LABELS = len(CFG.LABELS)
+print(f'# labels: {CFG.N_LABELS}')
+
+display(sample_submission.head())
 
 
 # %%
@@ -146,59 +175,20 @@ meta_df = pd.read_csv(CFG.TRAN_CSV)
 meta_df.head(2)
 
 # %%
-sample_submission = pd.read_csv(train_dir / 'sample_submission.csv')
-
-# Set labels
-CFG.LABELS = sample_submission.columns[1:]
-CFG.N_LABELS = len(CFG.LABELS)
-print(f'# labels: {CFG.N_LABELS}')
-
-display(sample_submission.head())
-
-# %%
 CFG.LABELS
-
 
 # %% [markdown]
 # ### Load data
 
 # %%
-def load_pickle(file, flag='rb'):
-    with (open(file, "rb")) as openfile:
-        while True:
-            try:
-                return pickle.load(openfile)
-            except EOFError:
-                break
-
+from dataset import spectro_dataset, bird_dataset
 
 # %%
-X = load_pickle(CFG.DATA_DIR / 'X.pkl')
-y = load_pickle(CFG.DATA_DIR / 'y.pkl')
-
-# %%
-filename = meta_df.iloc[0].filename
-# filename = 'asbfly/XC164848.ogg'
-filename
-
-# %%
-spec = X[filename]
-spec = imageio.imread(spec)
-librosa.display.specshow(spec, y_axis="mel", x_axis='s', sr=CFG.SR)
-plt.show()
-
-# %%
-# librosa.times_like(spec, sr=CFG.SR)[:20]
-
-# %%
-from dataset import spectro_dataset
-
-# %%
-dset = spectro_dataset(meta_df, X, y)
+dset = bird_dataset(meta_df, CFG)
 
 print(dset.__len__())
 
-spect, label, = dset.__getitem__(1)
+spect, label, = dset.__getitem__(0)
 print(spect.shape, label.shape)
 print(spect.dtype, label.dtype)
 
@@ -206,25 +196,37 @@ print(spect.dtype, label.dtype)
 librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
 plt.show()
 
+# %%
+librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
+plt.show()
 
 # %% [markdown]
 # ### Data Module
 
 # %%
-class spectro_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, cfg=CFG):
+from dataset import spectro_dataset, bird_dataset
+
+
+# %%
+class wav_datamodule(pl.LightningDataModule):
+    def __init__(self, train_df, val_df, cfg=CFG, train_tfs=None, val_tfs=None):
         super().__init__()
         
         self.train_df = train_df
         self.val_df = val_df
         
-        self.train_bs = cfg['BATCH_SIZE']
-        self.val_bs = cfg['BATCH_SIZE']
+        self.train_bs = cfg.BATCH_SIZE
+        self.val_bs = cfg.BATCH_SIZE
+
+        self.train_tfs = train_tfs
+        self.val_tfs = val_tfs
+
+        self.cfg = cfg
         
-        self.num_workers = cfg['num_workers']
+        self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = spectro_dataset(self.train_df, base_dir=cfg['spect_dir'], cols=vote_cols)
+        train_ds = bird_dataset(self.train_df, self.cfg, tfs=self.train_tfs)
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -232,13 +234,14 @@ class spectro_datamodule(pl.LightningDataModule):
             pin_memory=False,
             drop_last=False,
             shuffle=True,
+            persistent_workers=True,
             num_workers=self.num_workers,
         )
         
         return train_loader
         
     def val_dataloader(self):
-        val_ds = spectro_dataset(self.val_df, base_dir=cfg['spect_dir'], cols=vote_cols)
+        val_ds = bird_dataset(self.val_df, self.cfg, tfs=self.val_tfs)
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -246,15 +249,96 @@ class spectro_datamodule(pl.LightningDataModule):
             pin_memory=False,
             drop_last=False,
             shuffle=False,
-            num_workers=self.num_workers,
+            persistent_workers=True,
+            num_workers=1,
         )
         
         return val_loader
 
 
-# %%
+# %% jupyter={"source_hidden": true}
+# class spectro_datamodule(pl.LightningDataModule):
+#     def __init__(self, train_df, val_df, cfg=CFG):
+#         super().__init__()
+        
+#         self.train_df = train_df
+#         self.val_df = val_df
+        
+#         self.train_bs = cfg.BATCH_SIZE
+#         self.val_bs = cfg.BATCH_SIZE
+        
+#         self.num_workers = cfg.num_workers
+        
+#     def train_dataloader(self):
+#         train_ds = spectro_dataset(self.train_df, X, y)
+        
+#         train_loader = torch.utils.data.DataLoader(
+#             train_ds,
+#             batch_size=self.train_bs,
+#             pin_memory=False,
+#             drop_last=False,
+#             shuffle=True,
+#             num_workers=self.num_workers,
+#         )
+        
+#         return train_loader
+        
+#     def val_dataloader(self):
+#         val_ds = spectro_dataset(self.val_df, X, y)
+        
+#         val_loader = torch.utils.data.DataLoader(
+#             val_ds,
+#             batch_size=self.val_bs,
+#             pin_memory=False,
+#             drop_last=False,
+#             shuffle=False,
+#             num_workers=self.num_workers,
+#         )
+        
+#         return val_loader
 
 # %%
+image_size = CFG.image_size
+
+train_tfs = A.Compose([
+    # A.HorizontalFlip(p=0.5),
+    A.Resize(image_size, image_size),
+    # A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
+    A.Normalize()
+])
+
+val_tfs = A.Compose([
+    A.Resize(image_size, image_size),
+    A.Normalize()
+])
+
+# %%
+t_df = meta_df[:-100]
+v_df = meta_df[-100:]
+
+CFG2 = CFG
+CFG2.BATCH_SIZE = 16
+CFG2.num_workers = 2
+
+dm = wav_datamodule(t_df, v_df, cfg=CFG2)
+# dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+
+x, y = next(iter(dm.train_dataloader()))
+x.shape, y.shape, x.dtype, y.dtype
+
+# %%
+# img = x[0]
+# img.shape, img.unsqueeze(dim=0).numpy().shape, img.expand(3, -1, -1).shape
+
+# %%
+# img.expand(3, -1, -1).permute(1, 2, 0).shape, img.expand(3, -1, -1).permute(1, 2, 0).numpy().transpose(2,0,1).shape
+
+# %%
+# train_tfs(image=img.numpy())
+
+# %%
+del dm
+
 
 # %% [markdown]
 # ### Loss function
@@ -344,15 +428,10 @@ np.sum(model.feature_info.channels())
 # %%
 spect.shape
 
-# %%
-foo = model(spect.unsqueeze(0))
-len(foo)
 
 # %%
-foo[0].shape, foo[1].shape
-
-
-# %%
+# foo = model(spect.unsqueeze(0))
+# len(foo)
 
 # %%
 class GeMModel(pl.LightningModule):
@@ -364,6 +443,9 @@ class GeMModel(pl.LightningModule):
         out_indices = (3, 4)
 
         self.criterion = FocalLossBCE()
+
+        self.train_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
+        self.val_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
 
         # self.model_name = self.cfg.model_name
         print(self.cfg.model_name)
@@ -395,7 +477,7 @@ class GeMModel(pl.LightningModule):
         return x
         
     def configure_optimizers(self):
-        return torch.optim.Adam(model.parameters(), lr=cfg['lr'], weight_decay=0.015)
+        return torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
 
     def step(self, batch, batch_idx, mode='train'):
         x, y = batch
@@ -403,9 +485,6 @@ class GeMModel(pl.LightningModule):
         preds = self(x)
         
         loss = self.criterion(preds, y)
-
-        # kl_loss = self.kl_loss(F.log_softmax(preds, dim=1), y)
-        # loss = kl_loss
         
         if mode == 'train':
             self.train_acc(preds, y.argmax(1))
@@ -413,7 +492,7 @@ class GeMModel(pl.LightningModule):
             self.val_acc(preds, y.argmax(1))
         
         self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
-        self.log(f'{mode}/kl_loss', kl_loss, on_step=True, on_epoch=True)
+        # self.log(f'{mode}/kl_loss', kl_loss, on_step=True, on_epoch=True)
 
         return loss
     
@@ -424,7 +503,7 @@ class GeMModel(pl.LightningModule):
         return loss
         
     def validation_step(self, batch, batch_idx):
-        loss =  self.step(batch, batch_idx, mode='val')
+        loss = self.step(batch, batch_idx, mode='val')
         self.log(f'val/acc', self.val_acc, on_step=True, on_epoch=True)
     
         return loss
@@ -439,9 +518,105 @@ class GeMModel(pl.LightningModule):
 model = GeMModel(CFG)
 
 # %%
+foo = model(x)
+
+# %%
+foo.shape
+
+# %%
+
+# %%
+
+# %% [markdown]
+# ### Split
+
+# %%
+from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
+
+# %%
+sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=CFG.random_seed)
+train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
+
+t_df = meta_df.iloc[train_idx]
+v_df = meta_df.iloc[val_idx]
+
+t_df.shape, v_df.shape
 
 # %% [markdown]
 # ### Train
+
+# %%
+dm = wav_datamodule(t_df,v_df)
+
+# %%
+len(dm.train_dataloader()), len(dm.val_dataloader())
+
+# %%
+model = GeMModel(CFG)
+
+# %%
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import Callback, LearningRateMonitor
+
+# %%
+wandb_logger = WandbLogger(
+    name=f'{CFG.model_name[-2:]} {CFG.N_EPOCHS} eps {CFG.comment}',
+    project='Bird-local',
+    job_type='train',
+    save_dir=CFG.RESULTS_DIR,
+    # config=cfg,
+)
+
+# %%
+loss_ckpt = pl.callbacks.ModelCheckpoint(
+    monitor='val/loss',
+    dirpath=CFG.CKPT_DIR,
+    filename='loss-{epoch:02d}-{val/loss:.2f}',
+    save_top_k=1,
+    mode='min',
+)
+
+# %%
+CFG.device
+
+# %%
+trainer = pl.Trainer(
+    max_epochs=CFG.N_EPOCHS,
+    deterministic=True,
+    accelerator=CFG.device,
+    default_root_dir=CFG.RESULTS_DIR,
+    gradient_clip_val=5, 
+    gradient_clip_algorithm="value",
+    logger=wandb_logger,
+)
+
+# %%
+trainer.fit(model, dm)
+
+# %%
+wandb.finish()
+
+# %% [markdown]
+# ### Predict
+
+# %%
+foo = model(x.to(CFG.device))
+foo.shape
+
+# %%
+foo[0]
+
+# %%
+torch.nn.functional.softmax(foo[8], dim=-1)
+
+# %%
+torch.nn.functional.softmax(foo, dim=-1).argmax(dim=-1)
+
+# %%
+
+# %%
+
+# %%
 
 # %%
 
