@@ -22,9 +22,9 @@ def plot_energy(data, rate, figsize=(14,5)):
     plt.show()
 
 def plot_spectrogram(signal, sr, feature='linear', n_fft=2048, hop_length=512, win_length=None, window='hann', **kwargs):
-    
+
     if feature == 'linear':
-        D = librosa.amplitude_to_db(np.abs(librosa.stft(signal)), ref=np.max)
+        S = librosa.amplitude_to_db(np.abs(librosa.stft(signal)), ref=np.max)
     elif feature == 'mel':
         S = librosa.feature.melspectrogram(
             y=signal,
@@ -34,11 +34,10 @@ def plot_spectrogram(signal, sr, feature='linear', n_fft=2048, hop_length=512, w
             **kwargs,
         )
         
-        D = librosa.power_to_db(S ** 2, ref=np.max)
-
-   
+        S = librosa.power_to_db(S, ref=np.max)
+    
     plt.figure(figsize=(10, 4))
-    librosa.display.specshow(D, y_axis="linear")
+    librosa.display.specshow(S, y_axis=feature)
     plt.colorbar(format="%+2.0f dB")
     plt.title(f"{feature.capitalize()}-scaled spectrogram")
     plt.show()

@@ -66,6 +66,9 @@ taxonomy_df[taxonomy_df['SPECIES_CODE'] == 'integr']
 meta_df.primary_label.value_counts()
 
 # %%
+meta_df[meta_df['primary_label'] == 'nocall']
+
+# %%
 meta_df.filename[0]
 
 # %%
@@ -87,23 +90,18 @@ px.line(y=data[0, :rate*5], title=meta_df.common_name[0])
 # fig.show()
 
 # %%
-file_path = train_audio / meta_df.filename[1]
+file_path = train_audio / meta_df.filename[0]
 
 # %%
-data, rate = librosa.load(file_path)
+data, rate = librosa.load(file_path, sr=32000)
 energy = librosa.feature.rms(y=data)
 
 # %%
-data.shape, energy.shape
+data.shape, energy.shape, rate
 
 # %%
-rate
-
-# %%
-27*60, data.shape[0]/60
-
-# %%
-data.shape[0]/rate, rate
+stft = librosa.stft(data[:5*rate])
+stft.shape
 
 # %%
 librosa.times_like(data, sr=rate)[-1], librosa.times_like(energy).shape
@@ -129,11 +127,15 @@ stft = librosa.stft(data)
 stft.shape
 
 # %%
-D = librosa.amplitude_to_db(np.abs(librosa.stft(signal)), ref=np.max)
+stft = librosa.stft(data[:5*rate])
+librosa.get_duration(S=stft, sr=rate)
 
 # %%
+D = librosa.amplitude_to_db(np.abs(librosa.stft(data)), ref=np.max)
+D.shape
 
 # %%
+plot_spectrogram(data[:5*rate], rate, feature='linear')
 
 # %%
 plot_spectrogram(data, rate, feature='mel')
