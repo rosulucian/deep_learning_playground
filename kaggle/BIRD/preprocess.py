@@ -69,7 +69,7 @@ meta_df.head(2)
 sample_submission = pd.read_csv(train_dir / 'sample_submission.csv')
 
 # Set labels
-CONFIG.LABELS = sample_submission.columns[1:]
+CONFIG.LABELS = sample_submission.columns.to_list()[1:]
 CONFIG.N_LABELS = len(CONFIG.LABELS)
 print(f'# labels: {CONFIG.N_LABELS}')
 
@@ -84,11 +84,16 @@ LABEL2CLASS = dict([(v,k) for k, v in CLASS2LABEL.items()])
 # %%
 CONFIG.LABELS
 
+# %%
+LABEL2CLASS[0]
+
 
 # %% [markdown]
 # ### Preprocess scripts
 
 # %%
+# https://www.kaggle.com/code/samvelkoch/birdclef-2024-mel-spectrograms-generator-npy
+
 # A function for processing a single audio file and saving it
 def ogg2npy(file_path, destination, sr=32000):
     # Audio loading
