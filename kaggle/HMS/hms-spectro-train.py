@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.1
+#       jupytext_version: 1.16.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -35,7 +35,7 @@ from albumentations.pytorch import ToTensorV2
 from efficientnet_pytorch import EfficientNet
 
 # %%
-print(os.getenv('wandb_api_key'))
+# print(os.getenv('wandb_api_key'))
 
 # %%
 # os.environ
@@ -44,8 +44,8 @@ print(os.getenv('wandb_api_key'))
 # print(key=os.environ['wandb_api_key'])
 
 # %%
-# wandb.login(key=os.environ['wandb_api_key'])
-wandb.login(key='4015c794f679e3b16458b585c36e77213d391bc2')
+wandb.login(key=os.environ['wandb_api_key'])
+# wandb.login(key='')
 
 # %%
 accelerator = 'cuda' if torch.cuda.is_available() else 'cpu'  # Check GPU
