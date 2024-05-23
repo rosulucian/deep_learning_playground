@@ -90,7 +90,7 @@ class CFG:
     # Sample rate as provided in competition description
     SR = 32000
 
-    image_size = 256
+    image_size = 128
     
     ### split train and validation sets
     split_fraction = 0.95
@@ -99,10 +99,10 @@ class CFG:
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 ...  
     
     ### training
-    BATCH_SIZE = 64
+    BATCH_SIZE = 128
     # N_EPOCHS = 3 if DEBUG else 40
-    N_EPOCHS = 2
-    LEARNING_RATE = 1e-3
+    N_EPOCHS = 20
+    LEARNING_RATE = 1e-5
     
     ### set only one to True
     save_best_loss = False
@@ -256,7 +256,7 @@ class wav_datamodule(pl.LightningDataModule):
         return val_loader
 
 
-# %% jupyter={"source_hidden": true}
+# %%
 # class spectro_datamodule(pl.LightningDataModule):
 #     def __init__(self, train_df, val_df, cfg=CFG):
 #         super().__init__()
@@ -325,6 +325,14 @@ dm = wav_datamodule(t_df, v_df, cfg=CFG2)
 
 x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
+
+# %%
+# librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
+# plt.show()
+
+# %%
+librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
+plt.show()
 
 # %%
 # img = x[0]
@@ -546,7 +554,8 @@ t_df.shape, v_df.shape
 # ### Train
 
 # %%
-dm = wav_datamodule(t_df,v_df)
+# dm = wav_datamodule(t_df,v_df)
+dm = wav_datamodule(t_df, v_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
 
 # %%
 len(dm.train_dataloader()), len(dm.val_dataloader())
@@ -560,7 +569,7 @@ from pytorch_lightning.callbacks import Callback, LearningRateMonitor
 
 # %%
 wandb_logger = WandbLogger(
-    name=f'{CFG.model_name[-2:]} {CFG.N_EPOCHS} eps {CFG.comment}',
+    name=f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.comment}',
     project='Bird-local',
     job_type='train',
     save_dir=CFG.RESULTS_DIR,
@@ -585,8 +594,8 @@ trainer = pl.Trainer(
     deterministic=True,
     accelerator=CFG.device,
     default_root_dir=CFG.RESULTS_DIR,
-    gradient_clip_val=5, 
-    gradient_clip_algorithm="value",
+    gradient_clip_val=0.5, 
+    # gradient_clip_algorithm="value",
     logger=wandb_logger,
 )
 
@@ -600,21 +609,27 @@ wandb.finish()
 # ### Predict
 
 # %%
-foo = model(x.to(CFG.device))
+foo = model(x)
+# foo = model(x.to(CFG.device))
 foo.shape
 
 # %%
 foo[0]
 
 # %%
-torch.nn.functional.softmax(foo[8], dim=-1)
+torch.nn.functional.softmax(foo[0], dim=-1)
+
+# %%
+torch.nn.functional.softmax(foo, dim=-1).max(dim=-1)
 
 # %%
 torch.nn.functional.softmax(foo, dim=-1).argmax(dim=-1)
 
 # %%
+y.argmax(dim=-1)
 
 # %%
+y[0]
 
 # %%
 

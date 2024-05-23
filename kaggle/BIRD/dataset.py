@@ -101,7 +101,7 @@ class bird_dataset(torch.utils.data.Dataset):
         if self.tfs is not None:
             img = spect.permute(1,2,0).numpy()
             spect = self.tfs(image=img)['image']
-            spec = spec.transpose(2,0,1)
+            spect = spect.transpose(2,0,1)
         
         label = entry.primary_label
         
