@@ -72,7 +72,7 @@ class CFG:
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = train_dir / 'ckpt'
 
-    num_workers = 12
+    num_workers = 8
     # Maximum decibel to clip audio to
     TOP_DB = 100
     # Minimum rating
@@ -89,7 +89,7 @@ class CFG:
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 ...  
     
     ### training
-    BATCH_SIZE = 128
+    BATCH_SIZE = 4
     # N_EPOCHS = 3 if DEBUG else 40
     N_EPOCHS = 20
     LEARNING_RATE = 5*1e-6
@@ -201,24 +201,22 @@ len(files)
 files[0]
 
 # %%
-file = CFG.UNLABELED_FOLDER / files[0]
-
-wav = read_wav(file, CFG.SR)
-wav.shape, wav.shape[1]/CFG.SR
-
-# %%
 dset = bird_dataset_inference(files, CFG)
 len(dset)
 
 # %%
-spect = dset.__getitem__(0)
+spect, filename = dset.__getitem__(0)
 
-spect.dtype, spect.shape
+spect.dtype, spect.shape, filename
 
 # %%
 plt.figure(figsize=(14, 4))
-librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
+librosa.display.specshow(spect[0,0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
 plt.show()
+
+# %%
+spect = spect[0]
+spect.shape
 
 # %%
 remainder = spect.shape[-1] % 48
@@ -236,34 +234,232 @@ splits.shape
 librosa.display.specshow(splits[0,0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
 plt.show()
 
-# %%
+# %% [markdown]
+# ### Dataloader
 
 # %%
-for file in files:
-    file = CFG.UNLABELED_FOLDER / file
+from dataset import bird_dataset_inference
 
-    wav = read_wav(file)
-    
-    
-    print(file)
-    break
 
 # %%
+class inference_datamodule(pl.LightningDataModule):
+    def __init__(self, files, cfg=CFG, tfs=None, resize_tf=None):
+        super().__init__()
+        
+        self.files = files 
+
+        self.tfs = tfs
+        self.resize_tf = resize_tf
+
+        self.cfg = cfg
+
+        self.bs = self.cfg.BATCH_SIZE
+        self.num_workers = cfg.num_workers
+        
+    def predict_dataloader(self):
+        ds = bird_dataset_inference(self.files, self.cfg)
+        
+        train_loader = torch.utils.data.DataLoader(
+            ds,
+            batch_size=self.bs,
+            pin_memory=False,
+            drop_last=False,
+            # shuffle=True,
+            persistent_workers=True,
+            num_workers=self.num_workers,
+        )
+        
+        return train_loader
+
 
 # %%
+dm = inference_datamodule(files)
+
+# %%
+x, filenames = next(iter(dm.predict_dataloader()))
+x.shape, x.dtype
+
+# %%
+torch.flatten(x, start_dim=0, end_dim=1).shape
+
+# %%
+filenames
+
 
 # %% [markdown]
 # ### Load model
 
 # %%
+class FocalLossBCE(torch.nn.Module):
+    def __init__(
+            self,
+            alpha: float = 0.25,
+            gamma: float = 2,
+            reduction: str = "mean",
+            bce_weight: float = 1.0,
+            focal_weight: float = 1.0,
+    ):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+        self.bce = torch.nn.BCEWithLogitsLoss(reduction=reduction)
+        self.bce_weight = bce_weight
+        self.focal_weight = focal_weight
+
+    def forward(self, logits, targets):
+        focall_loss = torchvision.ops.focal_loss.sigmoid_focal_loss(
+            inputs=logits,
+            targets=targets,
+            alpha=self.alpha,
+            gamma=self.gamma,
+            reduction=self.reduction,
+        )
+        bce_loss = self.bce(logits, targets)
+        return self.bce_weight * bce_loss + self.focal_weight * focall_loss
+
+class GeM(torch.nn.Module):
+    def __init__(self, p=3, eps=1e-6):
+        super(GeM, self).__init__()
+        self.p = torch.nn.Parameter(torch.ones(1) * p)
+        self.eps = eps
+
+    def forward(self, x):
+        bs, ch, h, w = x.shape
+        x = torch.nn.functional.avg_pool2d(x.clamp(min=self.eps).pow(self.p), (x.size(-2), x.size(-1))).pow(
+            1.0 / self.p)
+        x = x.view(bs, ch)
+        return x
+
+class GeMModel(pl.LightningModule):
+    def __init__(self, cfg = CFG, pretrained = True):
+        super().__init__()
+
+        self.cfg = cfg
+        
+        out_indices = (3, 4)
+
+        self.criterion = FocalLossBCE()
+
+        self.train_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
+        self.val_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
+
+        # self.model_name = self.cfg.model_name
+        print(self.cfg.model_name)
+        
+        self.backbone = timm.create_model(
+            self.cfg.model_name, 
+            features_only=True,
+            pretrained=pretrained,
+            in_chans=3,
+            num_classes=self.cfg.N_LABELS,
+            out_indices=out_indices,
+        )
+
+        feature_dims = self.backbone.feature_info.channels()
+
+        self.global_pools = torch.nn.ModuleList([GeM() for _ in out_indices])
+        self.mid_features = np.sum(feature_dims)
+        
+        self.neck = torch.nn.BatchNorm1d(self.mid_features)
+        self.head = torch.nn.Linear(self.mid_features, self.cfg.N_LABELS)
+
+    def forward(self, x):
+        ms = self.backbone(x)
+        
+        h = torch.cat([global_pool(m) for m, global_pool in zip(ms, self.global_pools)], dim=1)
+        x = self.neck(h)
+        x = self.head(x)
+        
+        return x
+        
+    def configure_optimizers(self):
+        return torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
+
+    # def step(self, batch, batch_idx, mode='train'):
+    #     x, y = batch
+        
+    #     preds = self(x)
+        
+    #     loss = self.criterion(preds, y)
+        
+    #     if mode == 'train':
+    #         self.train_acc(preds, y.argmax(1))
+    #     else:
+    #         self.val_acc(preds, y.argmax(1))
+        
+    #     self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
+    #     # self.log(f'{mode}/kl_loss', kl_loss, on_step=True, on_epoch=True)
+
+    #     return loss
+        
+    def predict_step(self, batch):
+        spects, files = batch
+        spects = torch.flatten(spects, start_dim=0, end_dim=1)
+
+        preds = self(spects)
+
+        results_df = pd.DataFrame(files, columns = ['file'])
+        results_df['range'] = [ranges] * len(results_df)
+        results_df = results_df.explode('range', ignore_index=True)
+    
+        return preds, results_df
+    
+    def on_train_epoch_end(self):
+        self.train_acc.reset()
+        self.val_acc.reset()
+
+
 
 # %%
+model_path = Path("E:\\data\\BirdCLEF\\results\\Bird-local\\g5aw82o5\\checkpoints")
+model_path = model_path / os.listdir(model_path)[0]
+model_path
 
 # %%
+model = GeMModel.load_from_checkpoint(model_path)
+
+# %% [markdown]
+# ### Predict
+
+# %%
+dm = inference_datamodule(files[:10])
+
+# %%
+trainer = pl.Trainer()
+predictions = trainer.predict(model, dataloaders=dm)
+
+# %%
+len(predictions)
+
+# %%
+foo = predictions[0]
+preds = foo[0]
+preds.shape
+
+# %%
+preds = torch.nn.functional.softmax(preds, dim=-1)
+
+# %%
+preds.max(dim=-1)
+
+# %%
+for p in predictions:
+    df = p[1]
+    results = p[0]
+    # df
+    # print(df.head())
+    # print(p[0].max(dim=-1))
 
 # %%
 
 # %% [markdown]
-# ### Predict
+# ### Save
+
+# %%
+
+# %%
+
+# %%
 
 # %%

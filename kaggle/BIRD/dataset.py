@@ -112,7 +112,7 @@ class bird_dataset(torch.utils.data.Dataset):
         return spect, target
 
 class bird_dataset_inference(torch.utils.data.Dataset):
-    def __init__(self, files, cfg, tfs=None, normalize=True):
+    def __init__(self, files, cfg, normalize=True):
         super().__init__()
         
         self.files = files
@@ -121,23 +121,20 @@ class bird_dataset_inference(torch.utils.data.Dataset):
         self.mel_spec_params = cfg.mel_spec_params
         self.len = len(self.files)
 
-        self.duration = self.sr * 5
         self.mel_transform = torchaudio.transforms.MelSpectrogram(**cfg.mel_spec_params)
         self.db_transform = torchaudio.transforms.AmplitudeToDB(stype='power', top_db=cfg.TOP_DB)
 
-        self.tfs = tfs
-
-        self.num_classes = num_classes
-        self.bird2id = bird2id
-
-        self.normalize = normalize
+        self.tfs = A.Compose([
+            A.Resize(cfg.image_size, cfg.image_size),
+            A.Normalize(),
+        ])
         
     def __len__(self):
         return self.len
     
     def __getitem__(self, index: int):
-        filename = self.files[index]
-        filename = self.dir / filename
+        file = self.files[index]
+        filename = self.dir / file
         
         wav = read_wav(filename, self.sr)
 
@@ -147,17 +144,21 @@ class bird_dataset_inference(torch.utils.data.Dataset):
         spect = mel_spectrogram.squeeze(dim=0)
         spect = torch.stack([spect, spect, spect], dim = 0)
 
-        if self.tfs is not None:
-            img = spect.permute(1,2,0).numpy()
-            spect = self.tfs(image=img)['image']
-            spect = spect.transpose(2,0,1)
-
         remainder = spect.shape[-1] % 48
         spect = torch.split(spect[:,:,:-remainder], 312, dim=-1)
-        # resize
-        spect = torch.stack(spect)
         
-        return spect
+        transformed = []
+        for img in spect:
+            img = img.permute(1,2,0).numpy()
+            img = self.tfs(image=img)['image']
+            img = img.transpose(2,0,1)
+            img = torch.from_numpy(img).float()
+
+            transformed.append(img)
+
+        spect = torch.stack(transformed)
+        
+        return spect, file
 
 
 class spectro_dataset(torch.utils.data.Dataset):
