@@ -376,23 +376,6 @@ class GeMModel(pl.LightningModule):
     def configure_optimizers(self):
         return torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
 
-    # def step(self, batch, batch_idx, mode='train'):
-    #     x, y = batch
-        
-    #     preds = self(x)
-        
-    #     loss = self.criterion(preds, y)
-        
-    #     if mode == 'train':
-    #         self.train_acc(preds, y.argmax(1))
-    #     else:
-    #         self.val_acc(preds, y.argmax(1))
-        
-    #     self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
-    #     # self.log(f'{mode}/kl_loss', kl_loss, on_step=True, on_epoch=True)
-
-    #     return loss
-        
     def predict_step(self, batch):
         spects, files = batch
         spects = torch.flatten(spects, start_dim=0, end_dim=1)
@@ -402,12 +385,14 @@ class GeMModel(pl.LightningModule):
         results_df = pd.DataFrame(files, columns = ['file'])
         results_df['range'] = [ranges] * len(results_df)
         results_df = results_df.explode('range', ignore_index=True)
+        results_df['row_id'] = results_df.apply(lambda row: row['file'] + '_' + str(row['range']), axis=1)
+
+        preds = torch.nn.functional.softmax(preds, dim=-1).max(dim=-1)
+        
+        results_df['score'] = preds[0].cpu().numpy()
+        results_df['label'] = preds[1].cpu().numpy()
     
-        return preds, results_df
-    
-    def on_train_epoch_end(self):
-        self.train_acc.reset()
-        self.val_acc.reset()
+        return results_df
 
 
 
@@ -424,6 +409,7 @@ model = GeMModel.load_from_checkpoint(model_path)
 
 # %%
 dm = inference_datamodule(files[:10])
+# dm = inference_datamodule(files)
 
 # %%
 trainer = pl.Trainer()
@@ -433,23 +419,17 @@ predictions = trainer.predict(model, dataloaders=dm)
 len(predictions)
 
 # %%
-foo = predictions[0]
-preds = foo[0]
-preds.shape
+predictions = pd.concat(predictions,ignore_index=True)
+predictions.shape
 
 # %%
-preds = torch.nn.functional.softmax(preds, dim=-1)
+predictions.shape
 
 # %%
-preds.max(dim=-1)
+predictions.sample(5)
 
 # %%
-for p in predictions:
-    df = p[1]
-    results = p[0]
-    # df
-    # print(df.head())
-    # print(p[0].max(dim=-1))
+# predictions['row_id'] = predictions.apply(lambda row: row['file'] + '_' + str(row['range']), axis=1)
 
 # %%
 
