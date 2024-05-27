@@ -112,12 +112,13 @@ class bird_dataset(torch.utils.data.Dataset):
         return spect, target
 
 class bird_dataset_inference(torch.utils.data.Dataset):
-    def __init__(self, files, cfg, normalize=True):
+    def __init__(self, files, directory, cfg, normalize=True):
         super().__init__()
         
         self.files = files
         self.sr = cfg.SR
-        self.dir = Path(cfg.UNLABELED_FOLDER)
+        # self.dir = Path(cfg.UNLABELED_FOLDER)
+        self.dir = directory
         self.mel_spec_params = cfg.mel_spec_params
         self.len = len(self.files)
 

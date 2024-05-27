@@ -201,7 +201,7 @@ len(files)
 files[0]
 
 # %%
-dset = bird_dataset_inference(files, CFG)
+dset = bird_dataset_inference(files, CFG.UNLABELED_FOLDER, CFG)
 len(dset)
 
 # %%
@@ -243,10 +243,11 @@ from dataset import bird_dataset_inference
 
 # %%
 class inference_datamodule(pl.LightningDataModule):
-    def __init__(self, files, cfg=CFG, tfs=None, resize_tf=None):
+    def __init__(self, files, directory, cfg=CFG, tfs=None, resize_tf=None):
         super().__init__()
         
-        self.files = files 
+        self.files = files
+        self.dir = directory
 
         self.tfs = tfs
         self.resize_tf = resize_tf
@@ -257,7 +258,7 @@ class inference_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def predict_dataloader(self):
-        ds = bird_dataset_inference(self.files, self.cfg)
+        ds = bird_dataset_inference(self.files, self.dir, self.cfg)
         
         train_loader = torch.utils.data.DataLoader(
             ds,
@@ -273,7 +274,7 @@ class inference_datamodule(pl.LightningDataModule):
 
 
 # %%
-dm = inference_datamodule(files)
+dm = inference_datamodule(files, CFG.UNLABELED_FOLDER)
 
 # %%
 x, filenames = next(iter(dm.predict_dataloader()))
@@ -290,6 +291,19 @@ filenames
 # ### Load model
 
 # %%
+class GeM(torch.nn.Module):
+    def __init__(self, p=3, eps=1e-6):
+        super(GeM, self).__init__()
+        self.p = torch.nn.Parameter(torch.ones(1) * p)
+        self.eps = eps
+
+    def forward(self, x):
+        bs, ch, h, w = x.shape
+        x = torch.nn.functional.avg_pool2d(x.clamp(min=self.eps).pow(self.p), (x.size(-2), x.size(-1))).pow(
+            1.0 / self.p)
+        x = x.view(bs, ch)
+        return x
+
 class GeMModel(pl.LightningModule):
     def __init__(self, cfg = CFG, pretrained = True):
         super().__init__()
