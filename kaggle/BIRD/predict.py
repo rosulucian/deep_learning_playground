@@ -25,6 +25,7 @@ import random
 import pickle
 import imageio
 import librosa
+import torchaudio
 import torchvision
 
 import numpy as np
@@ -94,32 +95,8 @@ class CFG:
     N_EPOCHS = 20
     LEARNING_RATE = 5*1e-6
     
-    ### set only one to True
-    save_best_loss = False
-    save_best_accuracy = True
-    
-    ### optimizer
-    #   optimizer = 'adam'
-    # optimizer = 'adamw'
-    optimizer = 'rmsprop'
-    
-    weight_decay = 1e-6 # for adamw
-    l2_penalty = 0.01 # for RMSprop
-    rms_momentum = 0 # for RMSprop
-    
-    ### learning rate scheduler (LRS)
-    scheduler = 'ReduceLROnPlateau'
-    #   scheduler = 'CosineAnnealingLR'
-    plateau_factor = 0.5
-    plateau_patience = 3
-    cosine_T_max = 4
-    cosine_eta_min = 1e-8
-    verbose = True
-
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
     random_seed = 42
-
     comment = 'first'
 
 mel_spec_params = {
@@ -168,6 +145,12 @@ seed_torch(seed = CFG.random_seed)
 # %%
 files = [f for f in sorted(os.listdir(CFG.UNLABELED_FOLDER))]
 len(files)
+
+# %%
+file_path = CFG.UNLABELED_FOLDER / files[0]
+data, rate = torchaudio.load(file_path)
+print("Audio data shape:", data.shape)
+print("Sample rate:", rate)
 
 # %%
 step = 5
@@ -242,6 +225,11 @@ from dataset import bird_dataset_inference
 
 
 # %%
+def collate_fn(batch):
+   return  torch.stack([x[0] for x in batch]), torch.stack([x[1] for x in batch])
+
+
+# %%
 class inference_datamodule(pl.LightningDataModule):
     def __init__(self, files, directory, cfg=CFG, tfs=None, resize_tf=None):
         super().__init__()
@@ -266,6 +254,7 @@ class inference_datamodule(pl.LightningDataModule):
             pin_memory=False,
             drop_last=False,
             # shuffle=True,
+            # collate_fn=collate_fn,
             persistent_workers=True,
             num_workers=self.num_workers,
         )
@@ -317,7 +306,7 @@ class GeMModel(pl.LightningModule):
         self.backbone = timm.create_model(
             self.cfg.model_name, 
             features_only=True,
-            pretrained=pretrained,
+            pretrained=False,
             in_chans=3,
             num_classes=self.cfg.N_LABELS,
             out_indices=out_indices,
@@ -344,6 +333,8 @@ class GeMModel(pl.LightningModule):
         spects, files = batch
         spects = torch.flatten(spects, start_dim=0, end_dim=1)
 
+        # print(files)
+
         preds = self(spects)
 
         results_df = pd.DataFrame(files, columns = ['file'])
@@ -351,13 +342,13 @@ class GeMModel(pl.LightningModule):
         results_df = results_df.explode('range', ignore_index=True)
         results_df['row_id'] = results_df.apply(lambda row: row['file'] + '_' + str(row['range']), axis=1)
 
-        preds = torch.nn.functional.softmax(preds, dim=-1).max(dim=-1)
+        results = torch.nn.functional.softmax(preds, dim=-1).max(dim=-1)
         
-        results_df['score'] = preds[0].cpu().numpy()
-        results_df['label'] = preds[1].cpu().numpy()
+        results_df['score'] = results[0].cpu().numpy()
+        results_df['label'] = results[1].cpu().numpy()
     
+        # return results_df, preds
         return results_df
-
 
 
 # %%
@@ -372,18 +363,33 @@ model = GeMModel.load_from_checkpoint(model_path)
 # ### Predict
 
 # %%
-dm = inference_datamodule(files[:10])
-# dm = inference_datamodule(files)
+files = [f for f in sorted(os.listdir(CFG.UNLABELED_FOLDER))]
+len(files)
+
+# %%
+files[0]
+
+# %%
+# dm = inference_datamodule(files[:40], CFG.UNLABELED_FOLDER)
+dm = inference_datamodule(files, CFG.UNLABELED_FOLDER)
 
 # %%
 trainer = pl.Trainer()
 predictions = trainer.predict(model, dataloaders=dm)
 
 # %%
+# # data = predictions[0][1]
+# data.shape
+
+# %%
+# data_df = pd.DataFrame(data.softmax(dim=-1).numpy(), columns=CFG.LABELS)
+# data_df.head()
+
+# %%
 len(predictions)
 
 # %%
-predictions = pd.concat(predictions,ignore_index=True)
+predictions = pd.concat(predictions, ignore_index=True)
 predictions.shape
 
 # %%
@@ -396,11 +402,16 @@ predictions.sample(5)
 # predictions['row_id'] = predictions.apply(lambda row: row['file'] + '_' + str(row['range']), axis=1)
 
 # %%
+predictions[predictions['score'] > 0.95].shape
+
+# %%
+predictions['score'].hist()
 
 # %% [markdown]
 # ### Save
 
 # %%
+predictions.to_csv(train_dir / "submission.csv", index=False)
 
 # %%
 

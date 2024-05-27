@@ -139,6 +139,13 @@ class bird_dataset_inference(torch.utils.data.Dataset):
         
         wav = read_wav(filename, self.sr)
 
+        # check length and add padding
+        length = wav.shape[1]
+        limit = 4 * 60 * self.sr
+        if length < 4 * 60 * self.sr:
+            pad = torch.zeros(1, limit-length)
+            wav = torch.cat([wav,pad], dim=1)
+
         mel_spectrogram = normalize_melspec(self.db_transform(self.mel_transform(wav)))
         mel_spectrogram = mel_spectrogram * 255
         
@@ -158,6 +165,8 @@ class bird_dataset_inference(torch.utils.data.Dataset):
             transformed.append(img)
 
         spect = torch.stack(transformed)
+
+        # print(spect.shape)
         
         return spect, file
 
