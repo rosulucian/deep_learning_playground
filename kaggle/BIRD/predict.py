@@ -290,47 +290,6 @@ filenames
 # ### Load model
 
 # %%
-class FocalLossBCE(torch.nn.Module):
-    def __init__(
-            self,
-            alpha: float = 0.25,
-            gamma: float = 2,
-            reduction: str = "mean",
-            bce_weight: float = 1.0,
-            focal_weight: float = 1.0,
-    ):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.reduction = reduction
-        self.bce = torch.nn.BCEWithLogitsLoss(reduction=reduction)
-        self.bce_weight = bce_weight
-        self.focal_weight = focal_weight
-
-    def forward(self, logits, targets):
-        focall_loss = torchvision.ops.focal_loss.sigmoid_focal_loss(
-            inputs=logits,
-            targets=targets,
-            alpha=self.alpha,
-            gamma=self.gamma,
-            reduction=self.reduction,
-        )
-        bce_loss = self.bce(logits, targets)
-        return self.bce_weight * bce_loss + self.focal_weight * focall_loss
-
-class GeM(torch.nn.Module):
-    def __init__(self, p=3, eps=1e-6):
-        super(GeM, self).__init__()
-        self.p = torch.nn.Parameter(torch.ones(1) * p)
-        self.eps = eps
-
-    def forward(self, x):
-        bs, ch, h, w = x.shape
-        x = torch.nn.functional.avg_pool2d(x.clamp(min=self.eps).pow(self.p), (x.size(-2), x.size(-1))).pow(
-            1.0 / self.p)
-        x = x.view(bs, ch)
-        return x
-
 class GeMModel(pl.LightningModule):
     def __init__(self, cfg = CFG, pretrained = True):
         super().__init__()
@@ -339,12 +298,6 @@ class GeMModel(pl.LightningModule):
         
         out_indices = (3, 4)
 
-        self.criterion = FocalLossBCE()
-
-        self.train_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
-        self.val_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
-
-        # self.model_name = self.cfg.model_name
         print(self.cfg.model_name)
         
         self.backbone = timm.create_model(
@@ -372,9 +325,6 @@ class GeMModel(pl.LightningModule):
         x = self.head(x)
         
         return x
-        
-    def configure_optimizers(self):
-        return torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
 
     def predict_step(self, batch):
         spects, files = batch
