@@ -411,7 +411,7 @@ predictions['score'].hist()
 # ### Save
 
 # %%
-predictions.to_csv(train_dir / "submission.csv", index=False)
+predictions.to_csv(train_dir / "predictions.csv", index=False)
 
 # %%
 
