@@ -72,6 +72,8 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
+    comment = 'random-dropout'
+    
     DEBUG = False # True False
 
     # Competition Root Folder
@@ -80,7 +82,7 @@ class CFG:
     DATA_DIR = train_dir / 'spectros'
     TRAN_CSV = train_dir / 'train_metadata.csv'
     RESULTS_DIR = train_dir / 'results'
-    CKPT_DIR = train_dir / 'ckpt'
+    CKPT_DIR = RESULTS_DIR / 'ckpt'
 
     num_workers = 12
     # Maximum decibel to clip audio to
@@ -101,36 +103,14 @@ class CFG:
     ### training
     BATCH_SIZE = 128
     # N_EPOCHS = 3 if DEBUG else 40
-    N_EPOCHS = 20
-    LEARNING_RATE = 1e-5
-    
-    ### set only one to True
-    save_best_loss = False
-    save_best_accuracy = True
-    
-    ### optimizer
-    #   optimizer = 'adam'
-    # optimizer = 'adamw'
-    optimizer = 'rmsprop'
+    N_EPOCHS = 30
+    LEARNING_RATE = 5*1e-5
     
     weight_decay = 1e-6 # for adamw
-    l2_penalty = 0.01 # for RMSprop
-    rms_momentum = 0 # for RMSprop
-    
-    ### learning rate scheduler (LRS)
-    scheduler = 'ReduceLROnPlateau'
-    #   scheduler = 'CosineAnnealingLR'
-    plateau_factor = 0.5
-    plateau_patience = 3
-    cosine_T_max = 4
-    cosine_eta_min = 1e-8
-    verbose = True
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     random_seed = 42
-
-    comment = 'first'
 
 mel_spec_params = {
     "sample_rate": CFG.SR,
@@ -188,7 +168,7 @@ dset = bird_dataset(meta_df, CFG)
 
 print(dset.__len__())
 
-spect, label, = dset.__getitem__(0)
+spect, label, = dset.__getitem__(1)
 print(spect.shape, label.shape)
 print(spect.dtype, label.dtype)
 
@@ -226,7 +206,7 @@ class wav_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = bird_dataset(self.train_df, self.cfg, tfs=self.train_tfs)
+        train_ds = bird_dataset(self.train_df, self.cfg, tfs=self.train_tfs, mode='train')
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -241,7 +221,7 @@ class wav_datamodule(pl.LightningDataModule):
         return train_loader
         
     def val_dataloader(self):
-        val_ds = bird_dataset(self.val_df, self.cfg, tfs=self.val_tfs)
+        val_ds = bird_dataset(self.val_df, self.cfg, tfs=self.val_tfs, mode='val')
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -256,7 +236,7 @@ class wav_datamodule(pl.LightningDataModule):
         return val_loader
 
 
-# %%
+# %% jupyter={"source_hidden": true}
 # class spectro_datamodule(pl.LightningDataModule):
 #     def __init__(self, train_df, val_df, cfg=CFG):
 #         super().__init__()
@@ -303,7 +283,7 @@ image_size = CFG.image_size
 train_tfs = A.Compose([
     # A.HorizontalFlip(p=0.5),
     A.Resize(image_size, image_size),
-    # A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
+    A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
     A.Normalize()
 ])
 
@@ -329,6 +309,16 @@ x.shape, y.shape, x.dtype, y.dtype
 # %%
 # librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
 # plt.show()
+
+# %%
+librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
+plt.show()
+
+# %%
+dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+
+x, y = next(iter(dm.train_dataloader()))
+x.shape, y.shape, x.dtype, y.dtype
 
 # %%
 librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
@@ -568,8 +558,11 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import Callback, LearningRateMonitor
 
 # %%
+run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.comment}'
+
+# %%
 wandb_logger = WandbLogger(
-    name=f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.comment}',
+    name=run_name,
     project='Bird-local',
     job_type='train',
     save_dir=CFG.RESULTS_DIR,
@@ -578,9 +571,9 @@ wandb_logger = WandbLogger(
 
 # %%
 loss_ckpt = pl.callbacks.ModelCheckpoint(
-    monitor='val/loss',
-    dirpath=CFG.CKPT_DIR,
-    filename='loss-{epoch:02d}-{val/loss:.2f}',
+    monitor='val_loss',
+    dirpath=CFG.CKPT_DIR / run_name,
+    filename='{epoch:02d}-{val_loss:.5f}',
     save_top_k=1,
     mode='min',
 )
@@ -597,6 +590,7 @@ trainer = pl.Trainer(
     gradient_clip_val=0.5, 
     # gradient_clip_algorithm="value",
     logger=wandb_logger,
+    callbacks=[loss_ckpt],
 )
 
 # %%
@@ -607,6 +601,9 @@ wandb.finish()
 
 # %% [markdown]
 # ### Predict
+
+# %%
+x, y = next(iter(dm.train_dataloader()))
 
 # %%
 foo = model(x)
@@ -627,9 +624,6 @@ torch.nn.functional.softmax(foo, dim=-1).argmax(dim=-1)
 
 # %%
 y.argmax(dim=-1)
-
-# %%
-y[0]
 
 # %%
 

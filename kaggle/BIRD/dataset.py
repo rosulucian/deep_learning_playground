@@ -1,6 +1,7 @@
 import torch
-import torchaudio
 import imageio
+import random
+import torchaudio
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,8 @@ def read_wav(path, sr):
 def crop_wav(wav, start, duration):
     while wav.size(-1) < duration:
         wav = torch.cat([wav, wav], dim=1)
-    wav = wav[:, :duration]
+    
+    wav = wav[:, start:start+duration]
 
     return wav
 
@@ -60,7 +62,7 @@ num_classes = len(target_columns)
 bird2id = {b: i for i, b in enumerate(target_columns)}
 
 class bird_dataset(torch.utils.data.Dataset):
-    def __init__(self, df, cfg, tfs=None, normalize=True):
+    def __init__(self, df, cfg, tfs=None, normalize=True, mode='train'):
         super().__init__()
         
         self.df = df
@@ -75,6 +77,8 @@ class bird_dataset(torch.utils.data.Dataset):
 
         self.tfs = tfs
 
+        self.mode = mode
+
         self.num_classes = num_classes
         self.bird2id = bird2id
 
@@ -88,7 +92,14 @@ class bird_dataset(torch.utils.data.Dataset):
         filename = self.dir / entry.filename
         
         wav = read_wav(filename, self.sr)
-        wav = crop_wav(wav, 0, self.duration)
+
+        start = 0
+        # random start
+        if self.mode == 'train' and wav.shape[1] > self.duration:
+            stop = wav.shape[1] - self.duration
+            start = random.randint(0, stop)
+
+        wav = crop_wav(wav, start, self.duration)
 
         mel_spectrogram = normalize_melspec(self.db_transform(self.mel_transform(wav)))
         # mel_spectrogram = self.db_transform(self.mel_transform(wav))
