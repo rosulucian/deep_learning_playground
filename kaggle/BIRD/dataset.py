@@ -118,6 +118,12 @@ class bird_dataset(torch.utils.data.Dataset):
         
         target = np.zeros(self.num_classes, dtype=np.float32)
         target[self.bird2id[label]] = 1
+
+        # add secondary labels
+        for l in eval(entry.secondary_labels):
+            if l != "" and l in self.bird2id.keys():
+                target[self.bird2id[l]] = 1
+
         target = torch.from_numpy(target).float()
         
         return spect, target

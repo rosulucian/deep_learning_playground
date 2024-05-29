@@ -39,6 +39,7 @@ from pathlib import Path
 from IPython.display import Audio
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, AdamW, RMSprop # optmizers
+from warmup_scheduler import GradualWarmupScheduler
 from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau # Learning rate schedulers
 
@@ -72,7 +73,7 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = 'random-dropout'
+    comment = 'rand-dpout-multil'
     
     DEBUG = False # True False
 
@@ -102,9 +103,15 @@ class CFG:
     
     ### training
     BATCH_SIZE = 128
-    # N_EPOCHS = 3 if DEBUG else 40
+
+    ### Optimizer
+    USE_SCHD=False
     N_EPOCHS = 30
-    LEARNING_RATE = 5*1e-5
+    WARM_EPOCHS = 5
+    COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
+    
+    # LEARNING_RATE = 5*1e-5 # best
+    LEARNING_RATE = 5e-5
     
     weight_decay = 1e-6 # for adamw
 
@@ -153,6 +160,12 @@ seed_torch(seed = CFG.random_seed)
 # %%
 meta_df = pd.read_csv(CFG.TRAN_CSV)
 meta_df.head(2)
+
+# %%
+meta_df[meta_df['primary_label'] == 'magrob']
+
+# %%
+# meta_df.iloc[0].secondary_labels
 
 # %%
 CFG.LABELS
@@ -284,6 +297,7 @@ train_tfs = A.Compose([
     # A.HorizontalFlip(p=0.5),
     A.Resize(image_size, image_size),
     A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
+    # A.CoarseDropout(max_height=int(image_size * 0.17), max_width=int(image_size * 0.17), max_holes=2, p=0.7),
     A.Normalize()
 ])
 
@@ -386,7 +400,27 @@ class GeM(torch.nn.Module):
         return x
 
 
+# %% [markdown]
+# ### Optimizer
+
 # %%
+# Fix Warmup Bug
+class GradualWarmupSchedulerV2(GradualWarmupScheduler):
+    def __init__(self, optimizer, multiplier, total_epoch, after_scheduler=None):
+        super(GradualWarmupSchedulerV2, self).__init__(optimizer, multiplier, total_epoch, after_scheduler)
+    def get_lr(self):
+        if self.last_epoch > self.total_epoch:
+            if self.after_scheduler:
+                if not self.finished:
+                    self.after_scheduler.base_lrs = [base_lr * self.multiplier for base_lr in self.base_lrs]
+                    self.finished = True
+                return self.after_scheduler.get_lr()
+            return [base_lr * self.multiplier for base_lr in self.base_lrs]
+        if self.multiplier == 1.0:
+            return [base_lr * (float(self.last_epoch) / self.total_epoch) for base_lr in self.base_lrs]
+        else:
+            return [base_lr * ((self.multiplier - 1.) * self.last_epoch / self.total_epoch + 1.) for base_lr in self.base_lrs]
+
 
 # %% [markdown]
 # ### Model
@@ -475,7 +509,15 @@ class GeMModel(pl.LightningModule):
         return x
         
     def configure_optimizers(self):
-        return torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
+        
+        if self.cfg.USE_SCHD:
+            scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.cfg.COS_EPOCHS)
+            scheduler_warmup = GradualWarmupSchedulerV2(optimizer, multiplier=10, total_epoch=self.cfg.WARM_EPOCHS, after_scheduler=scheduler_cosine)
+            
+            return [optimizer], [scheduler_warmup]
+        else:
+            return optimizer
 
     def step(self, batch, batch_idx, mode='train'):
         x, y = batch
@@ -520,10 +562,6 @@ foo = model(x)
 
 # %%
 foo.shape
-
-# %%
-
-# %%
 
 # %% [markdown]
 # ### Split
@@ -571,12 +609,15 @@ wandb_logger = WandbLogger(
 
 # %%
 loss_ckpt = pl.callbacks.ModelCheckpoint(
-    monitor='val_loss',
+    monitor='val/loss',
     dirpath=CFG.CKPT_DIR / run_name,
     filename='{epoch:02d}-{val_loss:.5f}',
     save_top_k=1,
     mode='min',
 )
+
+# %%
+lr_monitor = LearningRateMonitor(logging_interval='step')
 
 # %%
 CFG.device
@@ -590,7 +631,8 @@ trainer = pl.Trainer(
     gradient_clip_val=0.5, 
     # gradient_clip_algorithm="value",
     logger=wandb_logger,
-    callbacks=[loss_ckpt],
+    callbacks=[loss_ckpt, lr_monitor],
+    
 )
 
 # %%
