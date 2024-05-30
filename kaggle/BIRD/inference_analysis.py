@@ -17,12 +17,51 @@ import pandas as pd
 import numpy as np
 
 # %%
+df_path = "E:\data\BirdCLEF\submission.csv"
+sub_path = 'E:\data\BirdCLEF\sample_submission.csv'
+
+# %%
+df = pd.read_csv(df_path)
+sample_submission = pd.read_csv(sub_path)
+df.shape
+
+# %%
+target_columns = sample_submission.columns[1:].tolist()
+num_classes = len(target_columns)
+bird2id = {b: i for i, b in enumerate(target_columns)}
+
+# %%
+# bird2id['magrob']
 
 # %%
 
 # %%
 
 # %%
+df['name'] = df.label.apply(lambda row: target_columns[row])
+
+# %%
+df.head()
+
+# %% [markdown]
+# ### Most detected labels
+
+# %%
+most_certain = df[df['score'] > 0.99]
+most_certain.shape
+
+# %%
+most_certain.label.nunique(), most_certain.label.value_counts()
+
+# %% [markdown]
+# ### Find nocall
+
+# %%
+no_call = df[df['score'] < 0.1]
+no_call.shape
+
+# %%
+no_call.head()
 
 # %%
 
