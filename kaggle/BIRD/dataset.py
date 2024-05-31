@@ -57,9 +57,10 @@ def normalize_melspec(X, eps=1e-6):
     return V
 
 # Set labels
-target_columns = sample_submission.columns[1:]
+sec_labels = ['lotshr1', 'orhthr1', 'magrob', 'indwhe1', 'bltmun1', 'asfblu1']
+target_columns = sample_submission.columns[1:].tolist()
 num_classes = len(target_columns)
-bird2id = {b: i for i, b in enumerate(target_columns)}
+bird2id = {b: i for i, b in enumerate(target_columns + sec_labels)}
 
 class bird_dataset(torch.utils.data.Dataset):
     def __init__(self, df, cfg, tfs=None, normalize=True, mode='train'):
@@ -79,7 +80,12 @@ class bird_dataset(torch.utils.data.Dataset):
 
         self.mode = mode
 
+        self.use_missing = cfg.USE_MISSING_LABELS
+
         self.num_classes = num_classes
+        if self.use_missing:
+            self.num_classes += len(sec_labels)
+
         self.bird2id = bird2id
 
         self.normalize = normalize
@@ -121,7 +127,7 @@ class bird_dataset(torch.utils.data.Dataset):
 
         # add secondary labels
         for l in eval(entry.secondary_labels):
-            if l != "" and l in self.bird2id.keys():
+            if l != "" and (l in target_columns or self.use_missing):
                 target[self.bird2id[l]] = 1
 
         target = torch.from_numpy(target).float()
@@ -186,7 +192,6 @@ class bird_dataset_inference(torch.utils.data.Dataset):
         # print(spect.shape)
         
         return spect, file
-
 
 class spectro_dataset(torch.utils.data.Dataset):
     def __init__(self, df, X, y, normalize=True):

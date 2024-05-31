@@ -73,10 +73,13 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = 'rand-dpout-multil'
+    comment = 'mixup-plain'
     
-    DEBUG = False # True False
+    MIXUP = True
+    USE_SCHD=False
 
+    USE_MISSING_LABELS = False
+    
     # Competition Root Folder
     ROOT_FOLDER = train_dir
     AUDIO_FOLDER = train_dir / 'train_audio'
@@ -105,9 +108,8 @@ class CFG:
     BATCH_SIZE = 128
 
     ### Optimizer
-    USE_SCHD=False
     N_EPOCHS = 30
-    WARM_EPOCHS = 5
+    WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
     
     # LEARNING_RATE = 5*1e-5 # best
@@ -138,7 +140,7 @@ CFG.mel_spec_params = mel_spec_params
 sample_submission = pd.read_csv(train_dir / 'sample_submission.csv')
 
 # Set labels
-CFG.LABELS = sample_submission.columns[1:]
+CFG.LABELS = sample_submission.columns[1:].tolist()
 CFG.N_LABELS = len(CFG.LABELS)
 print(f'# labels: {CFG.N_LABELS}')
 
@@ -168,7 +170,16 @@ meta_df[meta_df['primary_label'] == 'magrob']
 # meta_df.iloc[0].secondary_labels
 
 # %%
-CFG.LABELS
+sec_labels = ['lotshr1', 'orhthr1', 'magrob', 'indwhe1', 'bltmun1', 'asfblu1']
+
+# %%
+len(CFG.LABELS)
+
+# %%
+if CFG.USE_MISSING_LABELS is True:
+    CFG.LABELS += sec_labels
+    CFG.N_LABELS = len(CFG.LABELS)
+    len(CFG.LABELS)
 
 # %% [markdown]
 # ### Load data
@@ -408,14 +419,17 @@ class GeM(torch.nn.Module):
 class GradualWarmupSchedulerV2(GradualWarmupScheduler):
     def __init__(self, optimizer, multiplier, total_epoch, after_scheduler=None):
         super(GradualWarmupSchedulerV2, self).__init__(optimizer, multiplier, total_epoch, after_scheduler)
+        
     def get_lr(self):
         if self.last_epoch > self.total_epoch:
             if self.after_scheduler:
                 if not self.finished:
                     self.after_scheduler.base_lrs = [base_lr * self.multiplier for base_lr in self.base_lrs]
                     self.finished = True
+                    
                 return self.after_scheduler.get_lr()
             return [base_lr * self.multiplier for base_lr in self.base_lrs]
+            
         if self.multiplier == 1.0:
             return [base_lr * (float(self.last_epoch) / self.total_epoch) for base_lr in self.base_lrs]
         else:
@@ -462,8 +476,17 @@ spect.shape
 
 
 # %%
-# foo = model(spect.unsqueeze(0))
-# len(foo)
+def mixup(data, targets, alpha,device):
+    indices = torch.randperm(data.size(0))
+    data2 = data[indices]
+    targets2 = targets[indices]
+
+    lam = torch.FloatTensor([np.random.beta(alpha, alpha)]).to(device)
+    data = data * lam + data2 * (1 - lam)
+    targets = targets * lam + targets2 * (1 - lam)
+
+    return data, targets
+
 
 # %%
 class GeMModel(pl.LightningModule):
@@ -521,6 +544,9 @@ class GeMModel(pl.LightningModule):
 
     def step(self, batch, batch_idx, mode='train'):
         x, y = batch
+
+        if self.cfg.MIXUP and mode == 'train':
+            x, y = mixup(x, y, 0.5, self.cfg.device)
         
         preds = self(x)
         
@@ -610,10 +636,21 @@ wandb_logger = WandbLogger(
 # %%
 loss_ckpt = pl.callbacks.ModelCheckpoint(
     monitor='val/loss',
+    auto_insert_metric_name=False,
     dirpath=CFG.CKPT_DIR / run_name,
-    filename='{epoch:02d}-{val_loss:.5f}',
-    save_top_k=1,
+    filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
+    save_top_k=2,
     mode='min',
+)
+
+# %%
+acc_ckpt = pl.callbacks.ModelCheckpoint(
+    monitor='val/acc',
+    auto_insert_metric_name=False,
+    dirpath=CFG.CKPT_DIR / run_name,
+    filename='ep_{epoch:02d}_acc_{val/acc:.5f}',
+    save_top_k=2,
+    mode='max',
 )
 
 # %%
@@ -631,7 +668,7 @@ trainer = pl.Trainer(
     gradient_clip_val=0.5, 
     # gradient_clip_algorithm="value",
     logger=wandb_logger,
-    callbacks=[loss_ckpt, lr_monitor],
+    callbacks=[loss_ckpt, acc_ckpt, lr_monitor],
     
 )
 
