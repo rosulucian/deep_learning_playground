@@ -73,12 +73,12 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = 'mixup-plain'
+    comment = 'missing'
     
     MIXUP = True
     USE_SCHD=False
 
-    USE_MISSING_LABELS = False
+    USE_MISSING_LABELS = True
     
     # Competition Root Folder
     ROOT_FOLDER = train_dir
@@ -90,7 +90,8 @@ class CFG:
 
     num_workers = 12
     # Maximum decibel to clip audio to
-    TOP_DB = 100
+    # TOP_DB = 100
+    TOP_DB = 80
     # Minimum rating
     MIN_RATING = 3.0
     # Sample rate as provided in competition description
@@ -137,14 +138,22 @@ mel_spec_params = {
 
 CFG.mel_spec_params = mel_spec_params
 
+sec_labels = ['lotshr1', 'orhthr1', 'magrob', 'indwhe1', 'bltmun1', 'asfblu1']
+
 sample_submission = pd.read_csv(train_dir / 'sample_submission.csv')
 
 # Set labels
 CFG.LABELS = sample_submission.columns[1:].tolist()
+if CFG.USE_MISSING_LABELS:
+    CFG.LABELS += sec_labels
+    
 CFG.N_LABELS = len(CFG.LABELS)
 print(f'# labels: {CFG.N_LABELS}')
 
 display(sample_submission.head())
+
+# %%
+CFG.N_LABELS
 
 
 # %%
@@ -167,19 +176,7 @@ meta_df.head(2)
 meta_df[meta_df['primary_label'] == 'magrob']
 
 # %%
-# meta_df.iloc[0].secondary_labels
-
-# %%
-sec_labels = ['lotshr1', 'orhthr1', 'magrob', 'indwhe1', 'bltmun1', 'asfblu1']
-
-# %%
 len(CFG.LABELS)
-
-# %%
-if CFG.USE_MISSING_LABELS is True:
-    CFG.LABELS += sec_labels
-    CFG.N_LABELS = len(CFG.LABELS)
-    len(CFG.LABELS)
 
 # %% [markdown]
 # ### Load data
@@ -442,10 +439,10 @@ class GradualWarmupSchedulerV2(GradualWarmupScheduler):
 # %%
 print('Number of models available: ', len(timm.list_models(pretrained=True)))
 print('Number of models available: ', len(timm.list_models()))
-# print('\nDensenet models: ', timm.list_models('eff*'))
+print('\nDensenet models: ', timm.list_models('eca_nfnet_*'))
 
 # %%
-backbone = 'eca_nfnet_l0'
+backbone = 'eca_nfnet_l1'
 # backbone = 'efficientnet_b4'
 out_indices = (3, 4)
 
@@ -456,11 +453,14 @@ model = timm.create_model(
     pretrained=False,
     in_chans=3,
     num_classes=5,
-    out_indices=out_indices,
+    # out_indices=out_indices,
     )
 
 # %%
 # model.feature_info.
+
+# %%
+model.feature_info.channels()
 
 # %%
 model.feature_info.channels()
@@ -476,7 +476,7 @@ spect.shape
 
 
 # %%
-def mixup(data, targets, alpha,device):
+def mixup(data, targets, alpha, device):
     indices = torch.randperm(data.size(0))
     data2 = data[indices]
     targets2 = targets[indices]
@@ -485,6 +485,10 @@ def mixup(data, targets, alpha,device):
     data = data * lam + data2 * (1 - lam)
     targets = targets * lam + targets2 * (1 - lam)
 
+    # data += data2
+    # targets += targets2
+
+    # return data, targets.clip(max=1)
     return data, targets
 
 
@@ -501,6 +505,12 @@ class GeMModel(pl.LightningModule):
 
         self.train_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
         self.val_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
+
+        # self.train_acc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
+        # self.val_acc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
+
+        self.train_auroc = tm.classification.MulticlassAUROC(num_classes=self.cfg.N_LABELS)
+        self.val_auroc = tm.classification.MulticlassAUROC(num_classes=self.cfg.N_LABELS)
 
         # self.model_name = self.cfg.model_name
         print(self.cfg.model_name)
@@ -537,9 +547,12 @@ class GeMModel(pl.LightningModule):
         if self.cfg.USE_SCHD:
             scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.cfg.COS_EPOCHS)
             scheduler_warmup = GradualWarmupSchedulerV2(optimizer, multiplier=10, total_epoch=self.cfg.WARM_EPOCHS, after_scheduler=scheduler_cosine)
-            
+
             return [optimizer], [scheduler_warmup]
         else:
+            # LRscheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.2)
+            
+            # return [optimizer], [LRscheduler]
             return optimizer
 
     def step(self, batch, batch_idx, mode='train'):
@@ -554,8 +567,10 @@ class GeMModel(pl.LightningModule):
         
         if mode == 'train':
             self.train_acc(preds, y.argmax(1))
+            # self.train_auroc(preds, y.argmax(1))
         else:
             self.val_acc(preds, y.argmax(1))
+            # self.val_auroc(preds, y.argmax(1))
         
         self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
         # self.log(f'{mode}/kl_loss', kl_loss, on_step=True, on_epoch=True)
@@ -565,19 +580,22 @@ class GeMModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='train')
         self.log(f'train/acc', self.train_acc, on_step=True, on_epoch=True)
+        # self.log(f'train/auroc', self.train_auroc, on_step=True, on_epoch=True)
         
         return loss
         
     def validation_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='val')
         self.log(f'val/acc', self.val_acc, on_step=True, on_epoch=True)
+        # self.log(f'val/auroc', self.val_auroc, on_step=True, on_epoch=True)
     
         return loss
     
     def on_train_epoch_end(self):
         self.train_acc.reset()
-        self.val_acc.reset()
 
+    def on_validation_epoch_end(self):
+        self.val_acc.reset()
 
 
 # %%
@@ -627,7 +645,7 @@ run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.commen
 # %%
 wandb_logger = WandbLogger(
     name=run_name,
-    project='Bird-local',
+    project='Bird-local-2',
     job_type='train',
     save_dir=CFG.RESULTS_DIR,
     # config=cfg,
@@ -690,7 +708,10 @@ foo = model(x)
 foo.shape
 
 # %%
-foo[0]
+y[1]
+
+# %%
+foo[0].sigmoid()
 
 # %%
 torch.nn.functional.softmax(foo[0], dim=-1)
