@@ -73,7 +73,7 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = 'X-heavy-mixup'
+    comment = 'X-mixup-mel4096'
     
     DEBUG = False # True False
 
@@ -87,13 +87,16 @@ class CFG:
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
 
+    up_thr = 100
+    
     num_workers = 12
-    # Maximum decibel to clip audio to
-    TOP_DB = 100
+
     # Minimum rating
     MIN_RATING = 3.0
+    
     # Sample rate as provided in competition description
-    SR = 32000
+    # SR = 32000
+    SR = 20050
 
     image_size = 128
     
@@ -108,12 +111,12 @@ class CFG:
 
     ### Optimizer
     USE_SCHD=False
+    WARM_EPOCHS = 3
     N_EPOCHS = 30
-    WARM_EPOCHS = 5
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
     
     # LEARNING_RATE = 5*1e-5 # best
-    LEARNING_RATE = 5e-5
+    LEARNING_RATE = 1e-5
     
     weight_decay = 1e-6 # for adamw
 
@@ -121,12 +124,14 @@ class CFG:
     
     random_seed = 42
 
+    TOP_DB = 100
+
 mel_spec_params = {
     "sample_rate": CFG.SR,
-    "n_mels": 128,
-    "f_min": 20,
+    "n_mels": 256,
+    "f_min": 10,
     "f_max": CFG.SR / 2,
-    "n_fft": 2048,
+    "n_fft": 4096,
     "hop_length": 512,
     "normalized": True,
     "center" : True,
@@ -537,7 +542,7 @@ class GeMModel(pl.LightningModule):
     def step(self, batch, batch_idx, mode='train'):
         x, y = batch
 
-        if self.cfg.MIXUP and mode is 'train':
+        if self.cfg.MIXUP and mode == 'train':
             x, y = mixup(x, y, 0.5, self.cfg.device)
         
         preds = self(x)
@@ -586,6 +591,46 @@ foo.shape
 
 # %%
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
+
+
+# %%
+def upsample_data(df, thr=20):
+    # get the class distribution
+    class_dist = df['primary_label'].value_counts()
+
+    # identify the classes that have less than the threshold number of samples
+    down_classes = class_dist[class_dist < thr].index.tolist()
+
+    # create an empty list to store the upsampled dataframes
+    up_dfs = []
+
+    # loop through the undersampled classes and upsample them
+    for c in down_classes:
+        # get the dataframe for the current class
+        class_df = df.query("primary_label==@c")
+        # find number of samples to add
+        num_up = thr - class_df.shape[0]
+        # upsample the dataframe
+        class_df = class_df.sample(n=num_up, replace=True, random_state=CFG.random_seed)
+        # append the upsampled dataframe to the list
+        up_dfs.append(class_df)
+
+    # concatenate the upsampled dataframes and the original dataframe
+    up_df = pd.concat([df] + up_dfs, axis=0, ignore_index=True)
+    
+    return up_df
+
+
+# %%
+# sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=CFG.random_seed)
+# train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
+
+# t_df = meta_df.iloc[train_idx]
+# v_df = meta_df.iloc[val_idx]
+
+# t_df = upsample_data(t_df, thr=CFG.up_thr)
+
+# t_df.shape, v_df.shape
 
 # %%
 sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=CFG.random_seed)
