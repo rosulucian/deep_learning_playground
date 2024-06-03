@@ -73,7 +73,7 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = 'missing'
+    comment = 'topDB60'
     
     MIXUP = True
     USE_SCHD=False
@@ -91,7 +91,7 @@ class CFG:
     num_workers = 12
     # Maximum decibel to clip audio to
     # TOP_DB = 100
-    TOP_DB = 80
+    TOP_DB = 60
     # Minimum rating
     MIN_RATING = 3.0
     # Sample rate as provided in competition description
@@ -507,7 +507,7 @@ class GeMModel(pl.LightningModule):
         self.val_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
 
         # self.train_acc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
-        # self.val_acc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
+        self.val_macc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
 
         self.train_auroc = tm.classification.MulticlassAUROC(num_classes=self.cfg.N_LABELS)
         self.val_auroc = tm.classification.MulticlassAUROC(num_classes=self.cfg.N_LABELS)
@@ -570,6 +570,7 @@ class GeMModel(pl.LightningModule):
             # self.train_auroc(preds, y.argmax(1))
         else:
             self.val_acc(preds, y.argmax(1))
+            self.val_macc(preds, y)
             # self.val_auroc(preds, y.argmax(1))
         
         self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
@@ -587,6 +588,7 @@ class GeMModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='val')
         self.log(f'val/acc', self.val_acc, on_step=True, on_epoch=True)
+        self.log(f'val/macc', self.val_macc, on_step=True, on_epoch=True)
         # self.log(f'val/auroc', self.val_auroc, on_step=True, on_epoch=True)
     
         return loss
@@ -596,6 +598,7 @@ class GeMModel(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         self.val_acc.reset()
+        self.val_macc.reset()
 
 
 # %%
@@ -621,6 +624,10 @@ t_df = meta_df.iloc[train_idx]
 v_df = meta_df.iloc[val_idx]
 
 t_df.shape, v_df.shape
+
+# %%
+# t_df = t_df[t_df['rating'] > 1]
+# t_df.shape
 
 # %% [markdown]
 # ### Train
@@ -711,7 +718,21 @@ foo.shape
 y[1]
 
 # %%
-foo[0].sigmoid()
+foo.sigmoid().topk(3,dim=-1)
+
+# %%
+topk = foo.sigmoid().topk(3,dim=-1)
+
+# %%
+vals = topk[0].detach().numpy()
+idx = topk[1].detach().numpy()
+vals.shape, idx.shape
+
+# %%
+# idx, vals
+
+# %%
+np.concatenate([vals,idx], axis=-1).shape
 
 # %%
 torch.nn.functional.softmax(foo[0], dim=-1)
