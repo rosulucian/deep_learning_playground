@@ -64,6 +64,8 @@ train_dir = Path('E:\data\BirdCLEF')
 class CFG:
     DEBUG = False # True False
 
+    USE_MISSING_LABELS = False
+
     # Competition Root Folder
     ROOT_FOLDER = train_dir
     AUDIO_FOLDER = train_dir / 'train_audio'
@@ -115,10 +117,15 @@ mel_spec_params = {
 
 CFG.mel_spec_params = mel_spec_params
 
+sec_labels = ['lotshr1', 'orhthr1', 'magrob', 'indwhe1', 'bltmun1', 'asfblu1']
+
 sample_submission = pd.read_csv(train_dir / 'sample_submission.csv')
 
 # Set labels
-CFG.LABELS = sample_submission.columns[1:]
+CFG.LABELS = sample_submission.columns[1:].tolist()
+if CFG.USE_MISSING_LABELS:
+    CFG.LABELS += sec_labels
+    
 CFG.N_LABELS = len(CFG.LABELS)
 print(f'# labels: {CFG.N_LABELS}')
 
@@ -333,8 +340,6 @@ class GeMModel(pl.LightningModule):
         spects, files = batch
         spects = torch.flatten(spects, start_dim=0, end_dim=1)
 
-        # print(files)
-
         preds = self(spects)
 
         results_df = pd.DataFrame(files, columns = ['file'])
@@ -342,19 +347,34 @@ class GeMModel(pl.LightningModule):
         results_df = results_df.explode('range', ignore_index=True)
         results_df['row_id'] = results_df.apply(lambda row: row['file'] + '_' + str(row['range']), axis=1)
 
-        results = torch.nn.functional.softmax(preds, dim=-1).max(dim=-1)
+        topk = preds.sigmoid().topk(3, dim=-1)
         
-        results_df['score'] = results[0].cpu().numpy()
-        results_df['label'] = results[1].cpu().numpy()
-    
+        vals = topk[0].cpu().detach().numpy()
+        idx = topk[1].cpu().detach().numpy()
+
+        cols = [f'top_{k+1}' for k in range(3)] + [f'top_{k+1}_idx' for k in range(3)]
+        vals_df = pd.DataFrame(vals, columns=cols[:3])
+        idx_df = pd.DataFrame(idx, columns=cols[3:])
+        
+        # results = torch.cat(results[0].tolist(), results[1].tolist())
+
+        
+        # preds_df = pd.DataFrame(results, columns=cols)
+
+        results_df = pd.concat([results_df, vals_df, idx_df], axis=1)
+        
         # return results_df, preds
         return results_df
 
+# %%
+# model_path = Path("E:\\data\\BirdCLEF\\results\\Bird-local\\g5aw82o5\\checkpoints")
+model_path = Path("E:\\data\\BirdCLEF\\results\\ckpt\\eca_nfnet_l0 5e-05 30 eps mixup-plain\\ep_29_acc_0.60490.ckpt")
+
+# model_path = model_path / os.listdir(model_path)[0]
+model_path
 
 # %%
-model_path = Path("E:\\data\\BirdCLEF\\results\\Bird-local\\g5aw82o5\\checkpoints")
-model_path = model_path / os.listdir(model_path)[0]
-model_path
+([f'top_{k+1}' for k in range(3)] + [f'top_{k+1}_idx' for k in range(3)])
 
 # %%
 model = GeMModel.load_from_checkpoint(model_path)
@@ -370,15 +390,16 @@ len(files)
 files[0]
 
 # %%
-# dm = inference_datamodule(files[:40], CFG.UNLABELED_FOLDER)
+# dm = inference_datamodule(files[:10], CFG.UNLABELED_FOLDER)
 dm = inference_datamodule(files, CFG.UNLABELED_FOLDER)
 
 # %%
 trainer = pl.Trainer()
 predictions = trainer.predict(model, dataloaders=dm)
+len(predictions)
 
 # %%
-# # data = predictions[0][1]
+# data = predictions[0][1]
 # data.shape
 
 # %%
@@ -402,10 +423,10 @@ predictions.sample(5)
 # predictions['row_id'] = predictions.apply(lambda row: row['file'] + '_' + str(row['range']), axis=1)
 
 # %%
-predictions[predictions['score'] > 0.95].shape
+# predictions[predictions['score'] > 0.95].shape
 
 # %%
-predictions['score'].hist()
+# predictions['score'].hist()
 
 # %% [markdown]
 # ### Save
