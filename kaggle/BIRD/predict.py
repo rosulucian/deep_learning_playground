@@ -420,6 +420,17 @@ predictions.shape
 predictions.sample(5)
 
 # %%
+predictions[predictions['top_1'] > 0.9].shape
+
+# %%
+predictions[predictions['top_1'] < 0.2].shape
+
+# %%
+predictions[predictions['top_1'] < 0.1].sample(4)
+
+# %%
+
+# %%
 # predictions['row_id'] = predictions.apply(lambda row: row['file'] + '_' + str(row['range']), axis=1)
 
 # %%
@@ -432,7 +443,19 @@ predictions.sample(5)
 # ### Save
 
 # %%
+predictions.drop('row_id', axis=1, inplace=True)
+
+# %%
+predictions.rename(columns={'file': 'filename'}, inplace=True)
+
+
+# %%
+predictions['filename']  = f'{CFG.UNLABELED_FOLDER}\\' + predictions['filename']
+
+# %%
 predictions.to_csv(train_dir / "predictions.csv", index=False)
+
+# %%
 
 # %%
 
