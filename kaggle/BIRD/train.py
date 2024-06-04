@@ -73,29 +73,33 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = 'topDB60'
+    comment = '16khz'
     
     MIXUP = True
     USE_SCHD=False
 
     USE_MISSING_LABELS = True
+
+    UL_THRESH = 0.9
     
     # Competition Root Folder
     ROOT_FOLDER = train_dir
     AUDIO_FOLDER = train_dir / 'train_audio'
     DATA_DIR = train_dir / 'spectros'
-    TRAN_CSV = train_dir / 'train_metadata.csv'
+    TRAIN_CSV = train_dir / 'train_metadata.csv'
+    UNLABELED_CSV = train_dir / 'predictions.csv'
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
 
     num_workers = 12
     # Maximum decibel to clip audio to
     # TOP_DB = 100
-    TOP_DB = 60
+    TOP_DB = 80
     # Minimum rating
     MIN_RATING = 3.0
     # Sample rate as provided in competition description
-    SR = 32000
+    # SR = 32000
+    SR = 16000
 
     image_size = 128
     
@@ -109,7 +113,7 @@ class CFG:
     BATCH_SIZE = 128
 
     ### Optimizer
-    N_EPOCHS = 30
+    N_EPOCHS = 25
     WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
     
@@ -150,6 +154,8 @@ if CFG.USE_MISSING_LABELS:
 CFG.N_LABELS = len(CFG.LABELS)
 print(f'# labels: {CFG.N_LABELS}')
 
+bird2id = {b: i for i, b in enumerate(CFG.LABELS)}
+
 display(sample_submission.head())
 
 # %%
@@ -169,7 +175,7 @@ def seed_torch(seed):
 seed_torch(seed = CFG.random_seed)
 
 # %%
-meta_df = pd.read_csv(CFG.TRAN_CSV)
+meta_df = pd.read_csv(CFG.TRAIN_CSV)
 meta_df.head(2)
 
 # %%
@@ -177,6 +183,66 @@ meta_df[meta_df['primary_label'] == 'magrob']
 
 # %%
 len(CFG.LABELS)
+
+# %%
+columns = ['primary_label', 'secondary_labels', 'filename']
+
+# %%
+meta_df['filename'] = f'{str(CFG.AUDIO_FOLDER)}\\' + meta_df['filename']
+
+# %%
+meta_df[columns].head(2)
+
+# %%
+meta_df = meta_df[columns]
+
+# %%
+meta_df['range'] = 0
+
+# %%
+cols = ['top_1', 'top_2', 'top_3', 'top_1_idx', 'top_2_idx', 'top_3_idx']
+
+
+# %%
+def get_scores(row):
+    labels = [row.primary_label] + eval(row.secondary_labels)
+    labels[:3]
+    labels = [bird2id[l] for l in labels]
+
+    labels = np.array(labels)
+
+    scores = np.zeros(3)
+    scores[labels] = 1
+    
+    return scores
+
+
+# %%
+get_scores(meta_df.iloc[0])
+
+# %%
+# meta_df[cols[:3]] = meta_df.apply(get_scores, axis='columns', result_type='expand')
+
+# %%
+
+# %%
+meta_df.head(2)
+
+# %%
+ul_df = pd.read_csv(CFG.UNLABELED_CSV)
+print(ul_df.shape)
+ul_df = ul_df[ul_df['top_1'] > CFG.UL_THRESH]
+print(ul_df.shape)
+
+ul_df.head(2)
+
+# %%
+# ul_df[ul_df['top_2'] > CFG.UL_THRESH].sample(5)
+
+# %%
+# meta_df = pd.concat([meta_df, ul_df], ignore_index=True)
+
+# %%
 
 # %% [markdown]
 # ### Load data
@@ -189,16 +255,16 @@ dset = bird_dataset(meta_df, CFG)
 
 print(dset.__len__())
 
-spect, label, = dset.__getitem__(1)
+spect, label, = dset.__getitem__(0)
 print(spect.shape, label.shape)
 print(spect.dtype, label.dtype)
 
 # %%
-librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
+librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
 plt.show()
 
 # %%
-librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
+librosa.display.specshow(spect[1].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
 plt.show()
 
 # %% [markdown]
@@ -251,7 +317,7 @@ class wav_datamodule(pl.LightningDataModule):
             drop_last=False,
             shuffle=False,
             persistent_workers=True,
-            num_workers=1,
+            num_workers=2,
         )
         
         return val_loader
@@ -316,6 +382,7 @@ val_tfs = A.Compose([
 
 # %%
 t_df = meta_df[:-100]
+# t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
 v_df = meta_df[-100:]
 
 CFG2 = CFG
@@ -333,7 +400,7 @@ x.shape, y.shape, x.dtype, y.dtype
 # plt.show()
 
 # %%
-librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
+librosa.display.specshow(x[2].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
 plt.show()
 
 # %%
@@ -622,6 +689,8 @@ train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
 
 t_df = meta_df.iloc[train_idx]
 v_df = meta_df.iloc[val_idx]
+
+# t_df = pd.concat([t_df, ul_df], ignore_index=True)
 
 t_df.shape, v_df.shape
 

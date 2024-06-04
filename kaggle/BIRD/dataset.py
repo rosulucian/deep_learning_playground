@@ -18,9 +18,11 @@ from albumentations.pytorch import ToTensorV2
 
 sample_submission = pd.read_csv('E:\data\BirdCLEF\sample_submission.csv')
 
-def read_wav(path, sr):
-    wav, org_sr = torchaudio.load(path, normalize=True)
+def read_wav(path, sr, frame_offset=0, num_frames=-1):
+    wav, org_sr = torchaudio.load(path, normalize=True, frame_offset=frame_offset, num_frames=num_frames)
+    
     wav = torchaudio.functional.resample(wav, orig_freq=org_sr, new_freq=sr)
+    
     return wav
 
 def crop_wav(wav, start, duration):
@@ -68,7 +70,7 @@ class bird_dataset(torch.utils.data.Dataset):
         
         self.df = df
         self.sr = cfg.SR
-        self.dir = Path(cfg.AUDIO_FOLDER)
+        # self.dir = Path(cfg.AUDIO_FOLDER)
         self.mel_spec_params = cfg.mel_spec_params
         self.len = len(self.df)
 
@@ -95,22 +97,30 @@ class bird_dataset(torch.utils.data.Dataset):
     
     def __getitem__(self, index: int):
         entry = self.df.iloc[index]
-        filename = self.dir / entry.filename
+        filename = entry.filename
+
+        start = entry.range
         
-        wav = read_wav(filename, self.sr)
+        if start != 0:
+            start *= self.sr
+            start -= self.duration
 
-        start = 0
-        # random start
-        if self.mode == 'train' and wav.shape[1] > self.duration:
-            stop = wav.shape[1] - self.duration
-            start = random.randint(0, stop)
+            wav = read_wav(filename, self.sr, start, self.duration)
 
-        wav = crop_wav(wav, start, self.duration)
+        else:
+            wav = read_wav(filename, self.sr)
+            if self.mode == 'train' and wav.shape[1] > self.duration:
+                stop = wav.shape[1] - self.duration
+                start = random.randint(0, stop)
+
+            wav = crop_wav(wav, start, self.duration)
 
         mel_spectrogram = normalize_melspec(self.db_transform(self.mel_transform(wav)))
         # mel_spectrogram = self.db_transform(self.mel_transform(wav))
 
         mel_spectrogram = mel_spectrogram * 255
+
+        # print(mel_spectrogram.shape)
         
         spect = mel_spectrogram.squeeze(dim=0)
         spect = torch.stack([spect, spect, spect], dim = 0)
@@ -119,16 +129,23 @@ class bird_dataset(torch.utils.data.Dataset):
             img = spect.permute(1,2,0).numpy()
             spect = self.tfs(image=img)['image']
             spect = spect.transpose(2,0,1)
-        
-        label = entry.primary_label
-        
-        target = np.zeros(self.num_classes, dtype=np.float32)
-        target[self.bird2id[label]] = 1
 
-        # add secondary labels
-        for l in eval(entry.secondary_labels):
-            if l != "" and (l in target_columns or self.use_missing):
-                target[self.bird2id[l]] = 1
+        # ###### get labels
+        target = np.zeros(self.num_classes, dtype=np.float32)
+        
+        if entry.range == 0:
+            label = entry.primary_label
+            target[self.bird2id[label]] = 1
+    
+            # add secondary labels
+            for l in eval(entry.secondary_labels):
+                if l != "" and (l in target_columns or self.use_missing):
+                    target[self.bird2id[l]] = 1
+        else:
+            idx = entry[['top_1_idx', 'top_2_idx', 'top_3_idx']].astype(np.int32)
+            vals = entry[['top_1', 'top_2', 'top_3']]
+
+            target[idx.tolist()] = vals
 
         target = torch.from_numpy(target).float()
         
