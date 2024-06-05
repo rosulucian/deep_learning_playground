@@ -73,14 +73,15 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = '16khz'
+    project = 'Bird-local-3'
+    comment = '16khz-small-window'
     
     MIXUP = True
-    USE_SCHD=False
-
+    USE_SCHD = False
+    USE_UL = False
     USE_MISSING_LABELS = True
 
-    UL_THRESH = 0.9
+    UL_THRESH = 0.05
     
     # Competition Root Folder
     ROOT_FOLDER = train_dir
@@ -113,7 +114,7 @@ class CFG:
     BATCH_SIZE = 128
 
     ### Optimizer
-    N_EPOCHS = 25
+    N_EPOCHS = 30
     WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
     
@@ -131,8 +132,8 @@ mel_spec_params = {
     "n_mels": 128,
     "f_min": 20,
     "f_max": CFG.SR / 2,
-    "n_fft": 2048,
-    "hop_length": 512,
+    "n_fft": 512,
+    "hop_length": 128,
     "normalized": True,
     "center" : True,
     "pad_mode" : "constant",
@@ -231,18 +232,22 @@ meta_df.head(2)
 # %%
 ul_df = pd.read_csv(CFG.UNLABELED_CSV)
 print(ul_df.shape)
-ul_df = ul_df[ul_df['top_1'] > CFG.UL_THRESH]
+ul_df = ul_df[ul_df['top_1'] < CFG.UL_THRESH]
 print(ul_df.shape)
 
 ul_df.head(2)
 
 # %%
+ul_df = ul_df.sample(1000)
+
+# %%
 # ul_df[ul_df['top_2'] > CFG.UL_THRESH].sample(5)
 
 # %%
-# meta_df = pd.concat([meta_df, ul_df], ignore_index=True)
+# meta_df = pd.concat([meta_df, ul_df.sample(1000)], ignore_index=True)
 
 # %%
+# meta_df.sample(10)
 
 # %% [markdown]
 # ### Load data
@@ -550,13 +555,13 @@ def mixup(data, targets, alpha, device):
 
     lam = torch.FloatTensor([np.random.beta(alpha, alpha)]).to(device)
     data = data * lam + data2 * (1 - lam)
+    
     targets = targets * lam + targets2 * (1 - lam)
+    return data, targets
 
     # data += data2
     # targets += targets2
-
     # return data, targets.clip(max=1)
-    return data, targets
 
 
 # %%
@@ -684,13 +689,14 @@ foo.shape
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
 
 # %%
-sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=CFG.random_seed)
+sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
 train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
 
 t_df = meta_df.iloc[train_idx]
 v_df = meta_df.iloc[val_idx]
 
-# t_df = pd.concat([t_df, ul_df], ignore_index=True)
+if CFG.USE_UL:
+    t_df = pd.concat([t_df, ul_df], ignore_index=True)
 
 t_df.shape, v_df.shape
 
@@ -721,7 +727,7 @@ run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.commen
 # %%
 wandb_logger = WandbLogger(
     name=run_name,
-    project='Bird-local-2',
+    project=CFG.project,
     job_type='train',
     save_dir=CFG.RESULTS_DIR,
     # config=cfg,
