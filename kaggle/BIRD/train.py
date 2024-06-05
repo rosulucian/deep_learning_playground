@@ -79,9 +79,13 @@ class CFG:
     MIXUP = True
     USE_SCHD = False
     USE_UL = False
-    USE_MISSING_LABELS = True
+    # USE_MISSING_LABELS = False
+    USE_SECONDARY = False
+    USE_MISSING_LABELS = USE_SECONDARY
+    USE_UPSAMPLE =True
 
     UL_THRESH = 0.05
+    up_thr = 50
     
     # Competition Root Folder
     ROOT_FOLDER = train_dir
@@ -92,7 +96,7 @@ class CFG:
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
 
-    num_workers = 12
+    num_workers = 16
     # Maximum decibel to clip audio to
     # TOP_DB = 100
     TOP_DB = 80
@@ -518,7 +522,6 @@ backbone = 'eca_nfnet_l1'
 # backbone = 'efficientnet_b4'
 out_indices = (3, 4)
 
-# %%
 model = timm.create_model(
     backbone,
     features_only=True,
@@ -528,23 +531,7 @@ model = timm.create_model(
     # out_indices=out_indices,
     )
 
-# %%
-# model.feature_info.
-
-# %%
-model.feature_info.channels()
-
-# %%
-model.feature_info.channels()
-
-# %%
-model.feature_info.channels()
-
-# %%
-np.sum(model.feature_info.channels())
-
-# %%
-spect.shape
+model.feature_info.channels(), np.sum(model.feature_info.channels())
 
 
 # %%
@@ -688,12 +675,47 @@ foo.shape
 # %%
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
 
+
+# %%
+def upsample_data(df, thr=20):
+    # get the class distribution
+    class_dist = df['primary_label'].value_counts()
+
+    # identify the classes that have less than the threshold number of samples
+    down_classes = class_dist[class_dist < thr].index.tolist()
+
+    # create an empty list to store the upsampled dataframes
+    up_dfs = []
+
+    # loop through the undersampled classes and upsample them
+    for c in down_classes:
+        # get the dataframe for the current class
+        class_df = df.query("primary_label==@c")
+        # find number of samples to add
+        num_up = thr - class_df.shape[0]
+        # upsample the dataframe
+        class_df = class_df.sample(n=num_up, replace=True, random_state=CFG.random_seed)
+        # append the upsampled dataframe to the list
+        up_dfs.append(class_df)
+
+    # concatenate the upsampled dataframes and the original dataframe
+    up_df = pd.concat([df] + up_dfs, axis=0, ignore_index=True)
+    
+    return up_df
+
+
 # %%
 sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
 train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
 
 t_df = meta_df.iloc[train_idx]
 v_df = meta_df.iloc[val_idx]
+
+if not CFG.USE_SECONDARY:
+    t_df = t_df[t_df['secondary_labels'] == '[]']
+
+if CFG.USE_UPSAMPLE:
+    t_df = upsample_data(t_df, thr=CFG.up_thr)
 
 if CFG.USE_UL:
     t_df = pd.concat([t_df, ul_df], ignore_index=True)
