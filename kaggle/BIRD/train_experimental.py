@@ -73,30 +73,38 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    comment = 'X-mixup-mel4096'
+    project = 'Bird-local-3'
+    comment = '16khz-small-window'
     
-    DEBUG = False # True False
-
     MIXUP = True
+    USE_SCHD = False
+    USE_UL = False
+    # USE_MISSING_LABELS = False
+    USE_SECONDARY = False
+    USE_MISSING_LABELS = USE_SECONDARY
+    USE_UPSAMPLE =True
 
+    UL_THRESH = 0.05
+    up_thr = 50
+    
     # Competition Root Folder
     ROOT_FOLDER = train_dir
     AUDIO_FOLDER = train_dir / 'train_audio'
     DATA_DIR = train_dir / 'spectros'
-    TRAN_CSV = train_dir / 'train_metadata.csv'
+    TRAIN_CSV = train_dir / 'train_metadata.csv'
+    UNLABELED_CSV = train_dir / 'predictions.csv'
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
 
-    up_thr = 100
-    
-    num_workers = 12
-
+    num_workers = 16
+    # Maximum decibel to clip audio to
+    # TOP_DB = 100
+    TOP_DB = 80
     # Minimum rating
     MIN_RATING = 3.0
-    
     # Sample rate as provided in competition description
     # SR = 32000
-    SR = 20050
+    SR = 32000
 
     image_size = 128
     
@@ -110,13 +118,12 @@ class CFG:
     BATCH_SIZE = 128
 
     ### Optimizer
-    USE_SCHD=False
-    WARM_EPOCHS = 3
     N_EPOCHS = 30
+    WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
     
     # LEARNING_RATE = 5*1e-5 # best
-    LEARNING_RATE = 1e-5
+    LEARNING_RATE = 5e-5
     
     weight_decay = 1e-6 # for adamw
 
@@ -124,14 +131,12 @@ class CFG:
     
     random_seed = 42
 
-    TOP_DB = 100
-
 mel_spec_params = {
     "sample_rate": CFG.SR,
-    "n_mels": 256,
-    "f_min": 10,
+    "n_mels": 128,
+    "f_min": 150,
     "f_max": CFG.SR / 2,
-    "n_fft": 4096,
+    "n_fft": 2048,
     "hop_length": 512,
     "normalized": True,
     "center" : True,
@@ -142,14 +147,24 @@ mel_spec_params = {
 
 CFG.mel_spec_params = mel_spec_params
 
+sec_labels = ['lotshr1', 'orhthr1', 'magrob', 'indwhe1', 'bltmun1', 'asfblu1']
+
 sample_submission = pd.read_csv(train_dir / 'sample_submission.csv')
 
 # Set labels
-CFG.LABELS = sample_submission.columns[1:]
+CFG.LABELS = sample_submission.columns[1:].tolist()
+if CFG.USE_MISSING_LABELS:
+    CFG.LABELS += sec_labels
+    
 CFG.N_LABELS = len(CFG.LABELS)
 print(f'# labels: {CFG.N_LABELS}')
 
+bird2id = {b: i for i, b in enumerate(CFG.LABELS)}
+
 display(sample_submission.head())
+
+# %%
+CFG.N_LABELS
 
 
 # %%
@@ -165,17 +180,78 @@ def seed_torch(seed):
 seed_torch(seed = CFG.random_seed)
 
 # %%
-meta_df = pd.read_csv(CFG.TRAN_CSV)
+meta_df = pd.read_csv(CFG.TRAIN_CSV)
 meta_df.head(2)
 
 # %%
 meta_df[meta_df['primary_label'] == 'magrob']
 
 # %%
-# meta_df.iloc[0].secondary_labels
+len(CFG.LABELS)
 
 # %%
-CFG.LABELS
+columns = ['primary_label', 'secondary_labels', 'filename']
+
+# %%
+meta_df['filename'] = f'{str(CFG.AUDIO_FOLDER)}\\' + meta_df['filename']
+
+# %%
+meta_df[columns].head(2)
+
+# %%
+meta_df = meta_df[columns]
+
+# %%
+meta_df['range'] = 0
+
+# %%
+cols = ['top_1', 'top_2', 'top_3', 'top_1_idx', 'top_2_idx', 'top_3_idx']
+
+
+# %%
+def get_scores(row):
+    labels = [row.primary_label] + eval(row.secondary_labels)
+    labels[:3]
+    labels = [bird2id[l] for l in labels]
+
+    labels = np.array(labels)
+
+    scores = np.zeros(3)
+    scores[labels] = 1
+    
+    return scores
+
+
+# %%
+get_scores(meta_df.iloc[0])
+
+# %%
+# meta_df[cols[:3]] = meta_df.apply(get_scores, axis='columns', result_type='expand')
+
+# %%
+
+# %%
+meta_df.head(2)
+
+# %%
+ul_df = pd.read_csv(CFG.UNLABELED_CSV)
+print(ul_df.shape)
+ul_df = ul_df[ul_df['top_1'] < CFG.UL_THRESH]
+print(ul_df.shape)
+
+ul_df.head(2)
+
+# %%
+ul_df = ul_df.sample(1000)
+
+# %%
+# ul_df[ul_df['top_2'] > CFG.UL_THRESH].sample(5)
+
+# %%
+# meta_df = pd.concat([meta_df, ul_df.sample(1000)], ignore_index=True)
+
+# %%
+# meta_df.sample(10)
 
 # %% [markdown]
 # ### Load data
@@ -188,16 +264,16 @@ dset = bird_dataset(meta_df, CFG)
 
 print(dset.__len__())
 
-spect, label, = dset.__getitem__(1)
+spect, label, = dset.__getitem__(0)
 print(spect.shape, label.shape)
 print(spect.dtype, label.dtype)
 
 # %%
-librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
+librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
 plt.show()
 
 # %%
-librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR)
+librosa.display.specshow(spect[1].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
 plt.show()
 
 # %% [markdown]
@@ -250,7 +326,7 @@ class wav_datamodule(pl.LightningDataModule):
             drop_last=False,
             shuffle=False,
             persistent_workers=True,
-            num_workers=1,
+            num_workers=2,
         )
         
         return val_loader
@@ -315,6 +391,7 @@ val_tfs = A.Compose([
 
 # %%
 t_df = meta_df[:-100]
+# t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
 v_df = meta_df[-100:]
 
 CFG2 = CFG
@@ -332,7 +409,7 @@ x.shape, y.shape, x.dtype, y.dtype
 # plt.show()
 
 # %%
-librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
+librosa.display.specshow(x[2].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
 plt.show()
 
 # %%
@@ -415,14 +492,17 @@ class GeM(torch.nn.Module):
 class GradualWarmupSchedulerV2(GradualWarmupScheduler):
     def __init__(self, optimizer, multiplier, total_epoch, after_scheduler=None):
         super(GradualWarmupSchedulerV2, self).__init__(optimizer, multiplier, total_epoch, after_scheduler)
+        
     def get_lr(self):
         if self.last_epoch > self.total_epoch:
             if self.after_scheduler:
                 if not self.finished:
                     self.after_scheduler.base_lrs = [base_lr * self.multiplier for base_lr in self.base_lrs]
                     self.finished = True
+                    
                 return self.after_scheduler.get_lr()
             return [base_lr * self.multiplier for base_lr in self.base_lrs]
+            
         if self.multiplier == 1.0:
             return [base_lr * (float(self.last_epoch) / self.total_epoch) for base_lr in self.base_lrs]
         else:
@@ -435,54 +515,40 @@ class GradualWarmupSchedulerV2(GradualWarmupScheduler):
 # %%
 print('Number of models available: ', len(timm.list_models(pretrained=True)))
 print('Number of models available: ', len(timm.list_models()))
-# print('\nDensenet models: ', timm.list_models('eff*'))
+print('\nDensenet models: ', timm.list_models('eca_nfnet_*'))
 
 # %%
-backbone = 'eca_nfnet_l0'
+backbone = 'eca_nfnet_l1'
 # backbone = 'efficientnet_b4'
 out_indices = (3, 4)
 
-# %%
 model = timm.create_model(
     backbone,
     features_only=True,
     pretrained=False,
     in_chans=3,
     num_classes=5,
-    out_indices=out_indices,
+    # out_indices=out_indices,
     )
 
-# %%
-# model.feature_info.
-
-# %%
-model.feature_info.channels()
-
-# %%
-model.feature_info.channels()
-
-# %%
-np.sum(model.feature_info.channels())
-
-# %%
-spect.shape
+model.feature_info.channels(), np.sum(model.feature_info.channels())
 
 
 # %%
-# foo = model(spect.unsqueeze(0))
-# len(foo)
-
-# %%
-def mixup(data, targets, alpha,device):
+def mixup(data, targets, alpha, device):
     indices = torch.randperm(data.size(0))
     data2 = data[indices]
     targets2 = targets[indices]
 
     lam = torch.FloatTensor([np.random.beta(alpha, alpha)]).to(device)
     data = data * lam + data2 * (1 - lam)
+    
     targets = targets * lam + targets2 * (1 - lam)
-
     return data, targets
+
+    # data += data2
+    # targets += targets2
+    # return data, targets.clip(max=1)
 
 
 # %%
@@ -498,6 +564,12 @@ class GeMModel(pl.LightningModule):
 
         self.train_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
         self.val_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
+
+        # self.train_acc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
+        self.val_macc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
+
+        self.train_auroc = tm.classification.MulticlassAUROC(num_classes=self.cfg.N_LABELS)
+        self.val_auroc = tm.classification.MulticlassAUROC(num_classes=self.cfg.N_LABELS)
 
         # self.model_name = self.cfg.model_name
         print(self.cfg.model_name)
@@ -534,9 +606,12 @@ class GeMModel(pl.LightningModule):
         if self.cfg.USE_SCHD:
             scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.cfg.COS_EPOCHS)
             scheduler_warmup = GradualWarmupSchedulerV2(optimizer, multiplier=10, total_epoch=self.cfg.WARM_EPOCHS, after_scheduler=scheduler_cosine)
-            
+
             return [optimizer], [scheduler_warmup]
         else:
+            # LRscheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.2)
+            
+            # return [optimizer], [LRscheduler]
             return optimizer
 
     def step(self, batch, batch_idx, mode='train'):
@@ -551,8 +626,11 @@ class GeMModel(pl.LightningModule):
         
         if mode == 'train':
             self.train_acc(preds, y.argmax(1))
+            # self.train_auroc(preds, y.argmax(1))
         else:
             self.val_acc(preds, y.argmax(1))
+            self.val_macc(preds, y)
+            # self.val_auroc(preds, y.argmax(1))
         
         self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
         # self.log(f'{mode}/kl_loss', kl_loss, on_step=True, on_epoch=True)
@@ -562,19 +640,24 @@ class GeMModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='train')
         self.log(f'train/acc', self.train_acc, on_step=True, on_epoch=True)
+        # self.log(f'train/auroc', self.train_auroc, on_step=True, on_epoch=True)
         
         return loss
         
     def validation_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='val')
         self.log(f'val/acc', self.val_acc, on_step=True, on_epoch=True)
+        self.log(f'val/macc', self.val_macc, on_step=True, on_epoch=True)
+        # self.log(f'val/auroc', self.val_auroc, on_step=True, on_epoch=True)
     
         return loss
     
     def on_train_epoch_end(self):
         self.train_acc.reset()
-        self.val_acc.reset()
 
+    def on_validation_epoch_end(self):
+        self.val_acc.reset()
+        self.val_macc.reset()
 
 
 # %%
@@ -622,24 +705,26 @@ def upsample_data(df, thr=20):
 
 
 # %%
-# sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=CFG.random_seed)
-# train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
-
-# t_df = meta_df.iloc[train_idx]
-# v_df = meta_df.iloc[val_idx]
-
-# t_df = upsample_data(t_df, thr=CFG.up_thr)
-
-# t_df.shape, v_df.shape
-
-# %%
-sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=CFG.random_seed)
+sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
 train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
 
 t_df = meta_df.iloc[train_idx]
 v_df = meta_df.iloc[val_idx]
 
+if not CFG.USE_SECONDARY:
+    t_df = t_df[t_df['secondary_labels'] == '[]']
+
+if CFG.USE_UPSAMPLE:
+    t_df = upsample_data(t_df, thr=CFG.up_thr)
+
+if CFG.USE_UL:
+    t_df = pd.concat([t_df, ul_df], ignore_index=True)
+
 t_df.shape, v_df.shape
+
+# %%
+# t_df = t_df[t_df['rating'] > 1]
+# t_df.shape
 
 # %% [markdown]
 # ### Train
@@ -664,7 +749,7 @@ run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.commen
 # %%
 wandb_logger = WandbLogger(
     name=run_name,
-    project='Bird-local-X',
+    project=CFG.project,
     job_type='train',
     save_dir=CFG.RESULTS_DIR,
     # config=cfg,
@@ -673,10 +758,21 @@ wandb_logger = WandbLogger(
 # %%
 loss_ckpt = pl.callbacks.ModelCheckpoint(
     monitor='val/loss',
+    auto_insert_metric_name=False,
     dirpath=CFG.CKPT_DIR / run_name,
-    filename='{epoch:02d}-{val_loss:.5f}',
-    save_top_k=1,
+    filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
+    save_top_k=2,
     mode='min',
+)
+
+# %%
+acc_ckpt = pl.callbacks.ModelCheckpoint(
+    monitor='val/acc',
+    auto_insert_metric_name=False,
+    dirpath=CFG.CKPT_DIR / run_name,
+    filename='ep_{epoch:02d}_acc_{val/acc:.5f}',
+    save_top_k=2,
+    mode='max',
 )
 
 # %%
@@ -694,7 +790,7 @@ trainer = pl.Trainer(
     gradient_clip_val=0.5, 
     # gradient_clip_algorithm="value",
     logger=wandb_logger,
-    callbacks=[loss_ckpt, lr_monitor],
+    callbacks=[loss_ckpt, acc_ckpt, lr_monitor],
     
 )
 
@@ -716,7 +812,24 @@ foo = model(x)
 foo.shape
 
 # %%
-foo[0]
+y[1]
+
+# %%
+foo.sigmoid().topk(3,dim=-1)
+
+# %%
+topk = foo.sigmoid().topk(3,dim=-1)
+
+# %%
+vals = topk[0].detach().numpy()
+idx = topk[1].detach().numpy()
+vals.shape, idx.shape
+
+# %%
+# idx, vals
+
+# %%
+np.concatenate([vals,idx], axis=-1).shape
 
 # %%
 torch.nn.functional.softmax(foo[0], dim=-1)
