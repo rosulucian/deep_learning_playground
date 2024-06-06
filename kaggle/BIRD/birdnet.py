@@ -47,6 +47,7 @@ class CFG:
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
     bird20223 = train_dir / 'bird2023.csv'
+    UNLABELED_FOLDER = train_dir / 'unlabeled_soundscapes'
 
 
 # %%
@@ -70,6 +71,7 @@ prim_df = meta_df[meta_df['secondary_labels'] == '[]']
 prim_df.shape
 
 # %%
+meta_df[meta_df['primary_label'] == 'zitcis1']
 
 # %% [markdown]
 # ### Analyze
@@ -79,6 +81,7 @@ prim_df.iloc[0]
 
 # %%
 filename = prim_df.iloc[0].filename
+filename = r"E:\data\BirdCLEF\unlabeled_soundscapes\1225526.ogg"
 filename
 
 # %%
@@ -91,16 +94,16 @@ recording = Recording(
     # lat=35.4244,
     # lon=-120.7463,
     # date=datetime(year=2022, month=5, day=10), # use date or week_48
-    min_conf=0.5,
+    min_conf=0.6,
 )
 recording.analyze()
 len(recording.detections)
 
 # %%
-recording.path, recording.path.split('/')[0].split('\\')[-1]
+recording.detections
 
 # %%
-recording.detections
+recording.path, recording.path.split('/')[0].split('\\')[-1]
 
 # %%
 label = recording.path.split('/')[0].split('\\')[-1]
@@ -111,10 +114,13 @@ data = [(label, x['start_time'], x['end_time']) for x in recording.detections]
 
 data[0]
 
+# %%
+recording.duration
+
 
 # %%
 def on_analyze_directory_complete(recordings, file=train_dir / "bird_preds.csv"):
-    detections = []
+    preds = []
     
     for rec in recordings:
         if rec.error:
@@ -125,16 +131,16 @@ def on_analyze_directory_complete(recordings, file=train_dir / "bird_preds.csv")
             
             # print(filename, label)
             
-            data = [(filename, label, x['start_time'], x['end_time']) for x in recording.detections]
-            detections.append(pd.DataFrame(data, columns = ['filename', 'label', 'start', 'end']))
+            data = [(filename, label, x['scientific_name'], x['start_time'], x['end_time'], x['confidence']) for x in rec.detections]
+            preds.append(pd.DataFrame(data, columns = ['filename', 'label', 'name', 'start', 'end', 'confidence']))
 
-    print(len(detections))
+    print(len(preds))
 
-    results_df = pd.concat(detections, axis=0)
+    results_df = pd.concat(preds, axis=0)
 
     results_df.to_csv(file, index=False)    
     
-    # return detections
+    # return preds
 
 
 # %%
@@ -156,5 +162,55 @@ batch.on_analyze_directory_complete = on_analyze_directory_complete
 
 # %%
 batch.process()
+
+
+# %%
+
+# %% [markdown]
+# ### Predict unlabeled
+
+# %%
+def unlabeled_complete(recordings, file=train_dir / "unlabeled_preds.csv"):
+    preds = []
+    
+    for rec in recordings:
+        if rec.error:
+            print(f'{rec.error_message} in {rec.path}')
+        else:
+            filename = rec.path.split('\\')[-1]
+            
+            # print(filename)
+            print(len(rec.detections))
+            
+            data = [(filename, x['scientific_name'], x['start_time'], x['end_time'], x['confidence']) for x in rec.detections]
+            preds.append(pd.DataFrame(data, columns = ['filename', 'name', 'start', 'end', 'confidence']))
+
+
+    print(len(preds))
+
+    results_df = pd.concat(preds, axis=0)
+
+    results_df.to_csv(file, index=False)  
+
+# %%
+directory = CFG.UNLABELED_FOLDER
+
+batch = DirectoryMultiProcessingAnalyzer(
+    directory,
+    analyzers=[analyzer],
+    patterns=["*.ogg"],
+    # patterns=["460830.ogg"],
+    # lon=10.1667,
+    # lat=77.0667,
+    # # date=datetime(year=2022, month=5, day=10),
+    min_conf=0.75,
+)
+
+batch.on_analyze_directory_complete = unlabeled_complete
+
+# %%
+batch.process()
+
+# %%
 
 # %%
