@@ -94,6 +94,7 @@ recording = Recording(
     # lat=35.4244,
     # lon=-120.7463,
     # date=datetime(year=2022, month=5, day=10), # use date or week_48
+    overlap=2,
     min_conf=0.6,
 )
 recording.analyze()
@@ -130,9 +131,10 @@ def on_analyze_directory_complete(recordings, file=train_dir / "bird_preds.csv")
             label = rec.path.split('\\')[-2]
             
             # print(filename, label)
+            duration = rec.duration
             
-            data = [(filename, label, x['scientific_name'], x['start_time'], x['end_time'], x['confidence']) for x in rec.detections]
-            preds.append(pd.DataFrame(data, columns = ['filename', 'label', 'name', 'start', 'end', 'confidence']))
+            data = [(filename, label, x['scientific_name'], x['start_time'], x['end_time'], duration, x['confidence']) for x in rec.detections]
+            preds.append(pd.DataFrame(data, columns = ['filename', 'label', 'name', 'start', 'end', 'duration', 'confidence']))
 
     print(len(preds))
 
@@ -170,7 +172,7 @@ batch.process()
 # ### Predict unlabeled
 
 # %%
-def unlabeled_complete(recordings, file=train_dir / "unlabeled_preds.csv"):
+def unlabeled_complete(recordings, file= train_dir / "unlabeled_preds.csv"):
     preds = []
     
     for rec in recordings:
