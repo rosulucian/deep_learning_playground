@@ -163,6 +163,7 @@ batch = DirectoryMultiProcessingAnalyzer(
 batch.on_analyze_directory_complete = on_analyze_directory_complete
 
 # %%
+# %%time
 batch.process()
 
 
@@ -211,6 +212,7 @@ batch = DirectoryMultiProcessingAnalyzer(
 batch.on_analyze_directory_complete = unlabeled_complete
 
 # %%
+# %%time
 batch.process()
 
 # %%
