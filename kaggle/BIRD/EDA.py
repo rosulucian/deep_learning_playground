@@ -198,57 +198,26 @@ def cat_feature_dist(data, feature):
 # %%
 cat_feature_dist(meta_df, 'primary_label')
 
-
-# %%
-def upsample_data(df, thr=20):
-    # get the class distribution
-    class_dist = df['primary_label'].value_counts()
-
-    # identify the classes that have less than the threshold number of samples
-    down_classes = class_dist[class_dist < thr].index.tolist()
-
-    # create an empty list to store the upsampled dataframes
-    up_dfs = []
-
-    # loop through the undersampled classes and upsample them
-    for c in down_classes:
-        # get the dataframe for the current class
-        class_df = df.query("primary_label==@c")
-        # find number of samples to add
-        num_up = thr - class_df.shape[0]
-        # upsample the dataframe
-        class_df = class_df.sample(n=num_up, replace=True, random_state=CFG.random_seed)
-        # append the upsampled dataframe to the list
-        up_dfs.append(class_df)
-
-    # concatenate the upsampled dataframes and the original dataframe
-    up_df = pd.concat([df] + up_dfs, axis=0, ignore_index=True)
-    
-    return up_df
-
-
-# %%
-up_thr = 50
-up_df = upsample_data(meta_df, thr=up_thr)
-
 # %%
 # cat_feature_dist(up_df, 'primary_label')
 
 # %%
 plt.figure(figsize=(12*2, 6))
 
+label = 'primary_label'
+
 # Upsample data
-# up_thr = 50
-# up_df = upsample_data(meta_df, thr=up_thr)
+up_thr = 50
+up_df = upsample_data(meta_df, thr=up_thr)
 print("\n# BirdCLEF - 23")
 print(f'> Before Upsample: {len(meta_df)}')
 print(f'> After Upsample: {len(up_df)}')
 
 ax1 = plt.subplot(1, 2, 1)
-up_df.primary_label.value_counts()[:].plot.bar(color='green', label='w/ upsample')
-meta_df.primary_label.value_counts()[:].plot.bar(color='blue', label='original')
+up_df[label].value_counts()[:].plot.bar(color='green', label='w/ upsample')
+meta_df[label].value_counts()[:].plot.bar(color='blue', label='original')
 
-# dn_df.primary_label.value_counts()[:].plot.bar(color='red', label='w/ dowsample')
+# dn_df[label].value_counts()[:].plot.bar(color='red', label='w/ dowsample')
 plt.xticks([])
 plt.axhline(y=up_thr, color='g', linestyle='--', label='up threshold')
 plt.axhline(y=400, color='r', linestyle='--', label='down threshold')
@@ -257,8 +226,8 @@ plt.title("Upsample for Pre-Training")
 
 # Show effect of upsample
 ax2 = plt.subplot(1, 2, 2, sharey=ax1)
-up_df.primary_label.value_counts()[:].plot.bar(color='green', label='w/ upsample')
-meta_df.primary_label.value_counts()[:].plot.bar(color='red', label='w/o upsample')
+up_df[label].value_counts()[:].plot.bar(color='green', label='w/ upsample')
+meta_df[label].value_counts()[:].plot.bar(color='red', label='w/o upsample')
 plt.xticks([])
 plt.axhline(y=up_thr, color='g', linestyle='--', label='up threshold')
 plt.legend()
