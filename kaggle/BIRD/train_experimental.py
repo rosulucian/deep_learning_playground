@@ -100,7 +100,7 @@ class CFG:
     TRAIN_SET = train_dir / 'train_set.csv'
     VAL_SET = train_dir / 'val_set.csv'
 
-    num_workers = 16
+    num_workers = 8
     # Maximum decibel to clip audio to
     # TOP_DB = 100
     TOP_DB = 80
@@ -110,7 +110,7 @@ class CFG:
     # SR = 32000
     SR = 32000
 
-    image_size = 128
+    image_size = 64
     
     ### split train and validation sets
     split_fraction = 0.95
@@ -214,9 +214,15 @@ train_df = pd.read_csv(train_dir / 'train_set.csv')
 val_df = pd.read_csv(train_dir / 'val_set.csv')
 
 train_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + train_df['label'] + '/' + train_df['filename']
-val_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + train_df['label'] + '/' + val_df['filename']
+val_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + val_df['label'] + '/' + val_df['filename']
 
 train_df.shape, val_df.shape
+
+# %%
+# val_df[val_df['filename'] == 'XC496054.ogg']
+
+# %%
+# train_df[train_df['label'] == 'asbfly']
 
 # %%
 train_df.sample(4)
