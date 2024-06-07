@@ -74,7 +74,7 @@ train_dir = Path('E:\data\BirdCLEF')
 # %%
 class CFG:
     project = 'Bird-local-labels'
-    comment = 'better-labels'
+    comment = 'labels-random'
     
     MIXUP = True
     USE_SCHD = False
@@ -100,7 +100,7 @@ class CFG:
     TRAIN_SET = train_dir / 'train_set.csv'
     VAL_SET = train_dir / 'val_set.csv'
 
-    num_workers = 8
+    num_workers = 12
     # Maximum decibel to clip audio to
     # TOP_DB = 100
     TOP_DB = 80
@@ -110,7 +110,7 @@ class CFG:
     # SR = 32000
     SR = 32000
 
-    image_size = 64
+    image_size = 128
     
     ### split train and validation sets
     split_fraction = 0.95
@@ -119,7 +119,7 @@ class CFG:
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 ...  
     
     ### training
-    BATCH_SIZE = 128
+    BATCH_SIZE = 64
 
     ### Optimizer
     N_EPOCHS = 30
@@ -312,8 +312,8 @@ class wav_datamodule(pl.LightningDataModule):
             pin_memory=False,
             drop_last=False,
             shuffle=False,
-            persistent_workers=True,
-            num_workers=2,
+            persistent_workers=False,
+            num_workers=8,
         )
         
         return val_loader
@@ -336,7 +336,7 @@ val_tfs = A.Compose([
 ])
 
 # %%
-t_df = train_df[:100]
+t_df = train_df[:300]
 # t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
 v_df = val_df[:100]
 
@@ -561,10 +561,11 @@ class GeMModel(pl.LightningModule):
 
             return [optimizer], [scheduler_warmup]
         else:
-            # LRscheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.2)
+            LRscheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=8, gamma=0.2)
             
-            # return [optimizer], [LRscheduler]
-            return optimizer
+            return [optimizer], [LRscheduler]
+            
+            # return optimizer
 
     def step(self, batch, batch_idx, mode='train'):
         x, y = batch
@@ -662,6 +663,7 @@ loss_ckpt = pl.callbacks.ModelCheckpoint(
     auto_insert_metric_name=False,
     dirpath=CFG.CKPT_DIR / run_name,
     filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
+    every_n_epochs=8,
     save_top_k=2,
     mode='min',
 )

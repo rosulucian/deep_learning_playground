@@ -59,10 +59,29 @@ class birdnet_dataset(torch.utils.data.Dataset):
         entry = self.df.iloc[index]
         filename = entry.filename
 
+        info = torchaudio.info(filename)
+        length = int(info.num_frames / self.sr)
+        # print(length)
+
         start = entry.start
         stop = start + self.duration
 
-        wav = read_wav(filename, self.sr, start * self.sr, self.duration * self.sr)
+        # random sample with overlap
+        if self.mode == 'train' and length > 6 and start >= 3:
+            stop = start + 2
+            if stop >= length: 
+                stop = length - 2
+
+            start = random.randint(start-3, stop)
+
+        offset = start * self.sr
+        length = length * self.sr
+        num_frames = self.duration * self.sr
+        
+        if (offset + num_frames) > length: 
+            num_frames = length - offset
+
+        wav = read_wav(filename, self.sr, offset, num_frames)
         wav = crop_wav(wav, 0, self.duration * self.sr)
         
         mel_spectrogram = normalize_melspec(self.db_transform(self.mel_transform(wav)))
