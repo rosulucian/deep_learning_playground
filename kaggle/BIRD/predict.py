@@ -71,7 +71,7 @@ class CFG:
     AUDIO_FOLDER = train_dir / 'train_audio'
     UNLABELED_FOLDER = train_dir / 'unlabeled_soundscapes'
     DATA_DIR = train_dir / 'spectros'
-    TRAN_CSV = train_dir / 'train_metadata.csv'
+    TRAIN_CSV = train_dir / 'train_metadata.csv'
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = train_dir / 'ckpt'
 
@@ -145,6 +145,8 @@ def seed_torch(seed):
 seed_torch(seed = CFG.random_seed)
 
 # %%
+meta_df = pd.read_csv(CFG.TRAIN_CSV)
+meta_df.head(2)
 
 # %% [markdown]
 # ### Prepare dataframe
@@ -228,7 +230,7 @@ plt.show()
 # ### Dataloader
 
 # %%
-from dataset import bird_dataset_inference
+from dataset import bird_dataset_inference, bird_dataset
 
 
 # %%
@@ -380,6 +382,84 @@ model_path
 model = GeMModel.load_from_checkpoint(model_path)
 
 # %% [markdown]
+# ### Validation set
+
+# %%
+from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
+
+# %%
+sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=CFG.random_seed)
+train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
+
+v_df = meta_df.iloc[val_idx]
+
+v_df.shape
+
+# %%
+columns = ['primary_label', 'secondary_labels', 'filename']
+v_df['filename'] = f'{str(CFG.AUDIO_FOLDER)}\\' + v_df['filename']
+v_df = v_df[columns]
+v_df['range'] = 0
+
+# %%
+v_df.head()
+
+# %%
+image_size = CFG.image_size
+
+val_tfs = A.Compose([
+    A.Resize(image_size, image_size),
+    A.Normalize()
+])
+
+# %%
+val_ds = bird_dataset(v_df, CFG, tfs=val_tfs, mode='val')
+        
+val_loader = torch.utils.data.DataLoader(
+    val_ds,
+    batch_size=64,
+    pin_memory=False,
+    drop_last=False,
+    shuffle=False,
+    persistent_workers=True,
+    num_workers=2,
+)
+
+# %%
+preds = [ ]
+for x, y in val_loader:
+    preds.append(model(x.to(CFG.device)).sigmoid().detach().cpu())
+
+len(preds)
+
+# %%
+preds = [p.numpy() for p in preds]
+preds = np.concatenate(preds)
+preds.shape
+
+# %%
+preds.max(axis=-1)
+
+# %%
+v_df['label'] = preds.argmax(axis=-1)
+v_df['label_name'] = v_df.apply(lambda row: CFG.LABELS[row['label']], axis=1)
+
+# %%
+wrong_df = v_df[v_df['primary_label'] != v_df['label_name']]
+wrong_df.shape
+
+# %%
+wrong_df['primary_label'].value_counts()
+
+# %%
+v_df[v_df['primary_label'] != v_df['label_name']].sample(5)
+
+# %%
+meta_df[meta_df['primary_label'] == 'commoo3'].shape, meta_df[meta_df['primary_label'] == 'litgre1'].shape
+
+# %%
+
+# %% [markdown]
 # ### Predict
 
 # %%
@@ -423,7 +503,7 @@ predictions.sample(5)
 predictions[predictions['top_1'] > 0.9].shape
 
 # %%
-predictions[predictions['top_1'] < 0.2].shape
+predictions[predictions['top_1'] < 0.05].shape
 
 # %%
 predictions[predictions['top_1'] < 0.1].sample(4)
