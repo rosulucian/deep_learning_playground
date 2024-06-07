@@ -35,7 +35,7 @@ import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 
 from torch import nn
-from pathlib import Path
+from pathlib import Path, PurePath
 from IPython.display import Audio
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, AdamW, RMSprop # optmizers
@@ -74,7 +74,7 @@ train_dir = Path('E:\data\BirdCLEF')
 # %%
 class CFG:
     project = 'Bird-local-3'
-    comment = '16khz-small-window'
+    comment = 'better-labels'
     
     MIXUP = True
     USE_SCHD = False
@@ -82,13 +82,14 @@ class CFG:
     # USE_MISSING_LABELS = False
     USE_SECONDARY = False
     USE_MISSING_LABELS = USE_SECONDARY
-    USE_UPSAMPLE =True
+    USE_UPSAMPLE = False
 
     UL_THRESH = 0.05
     up_thr = 50
     
     # Competition Root Folder
     ROOT_FOLDER = train_dir
+    birds_csv = train_dir / 'bird_preds.csv'
     AUDIO_FOLDER = train_dir / 'train_audio'
     DATA_DIR = train_dir / 'spectros'
     TRAIN_CSV = train_dir / 'train_metadata.csv'
@@ -104,7 +105,7 @@ class CFG:
     MIN_RATING = 3.0
     # Sample rate as provided in competition description
     # SR = 32000
-    SR = 16000
+    SR = 32000
 
     image_size = 128
     
@@ -134,10 +135,10 @@ class CFG:
 mel_spec_params = {
     "sample_rate": CFG.SR,
     "n_mels": 128,
-    "f_min": 20,
+    "f_min": 150,
     "f_max": CFG.SR / 2,
-    "n_fft": 512,
-    "hop_length": 128,
+    "n_fft": 2048,
+    "hop_length": 512,
     "normalized": True,
     "center" : True,
     "pad_mode" : "constant",
@@ -184,19 +185,23 @@ meta_df = pd.read_csv(CFG.TRAIN_CSV)
 meta_df.head(2)
 
 # %%
-meta_df[meta_df['primary_label'] == 'magrob']
+# meta_df[meta_df['primary_label'] == 'magrob']
 
 # %%
 len(CFG.LABELS)
 
 # %%
-columns = ['primary_label', 'secondary_labels', 'filename']
+columns = ['primary_label', 'secondary_labels', 'filename', 'file']
 
 # %%
-meta_df['filename'] = f'{str(CFG.AUDIO_FOLDER)}\\' + meta_df['filename']
+meta_df['file'] = meta_df.apply(lambda row: row['filename'].split('/')[-1], axis=1)
+meta_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + meta_df['filename']
 
 # %%
 meta_df[columns].head(2)
+
+# %%
+meta_df.iloc[0].filename
 
 # %%
 meta_df = meta_df[columns]
@@ -229,6 +234,7 @@ get_scores(meta_df.iloc[0])
 # meta_df[cols[:3]] = meta_df.apply(get_scores, axis='columns', result_type='expand')
 
 # %%
+meta_df.iloc[0].filename
 
 # %%
 meta_df.head(2)
@@ -254,19 +260,39 @@ ul_df = ul_df.sample(1000)
 # meta_df.sample(10)
 
 # %% [markdown]
+# ### BIRDNet predictions df
+
+# %%
+birds_df = pd.read_csv(CFG.birds_csv)
+birds_df.shape, birds_df.head(2)
+
+# %%
+birds_df['filename'].value_counts()
+
+# %%
+meta_df[meta_df['filename'].str.contains('XC843759')]
+
+# %%
+
+# %%
+
+# %% [markdown]
 # ### Load data
 
 # %%
-from dataset import spectro_dataset, bird_dataset
+from dataset import birdnet_dataset
 
 # %%
-dset = bird_dataset(meta_df, CFG)
+dset = birdnet_dataset(meta_df, birds_df, CFG)
 
 print(dset.__len__())
 
 spect, label, = dset.__getitem__(0)
 print(spect.shape, label.shape)
 print(spect.dtype, label.dtype)
+
+# %%
+# interv.intersect.sum()
 
 # %%
 librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
@@ -280,16 +306,17 @@ plt.show()
 # ### Data Module
 
 # %%
-from dataset import spectro_dataset, bird_dataset
+from dataset import birdnet_dataset
 
 
 # %%
 class wav_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, cfg=CFG, train_tfs=None, val_tfs=None):
+    def __init__(self, train_df, val_df, birds_df, cfg=CFG, train_tfs=None, val_tfs=None):
         super().__init__()
         
         self.train_df = train_df
         self.val_df = val_df
+        self.birds_df = birds_df
         
         self.train_bs = cfg.BATCH_SIZE
         self.val_bs = cfg.BATCH_SIZE
@@ -302,7 +329,7 @@ class wav_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = bird_dataset(self.train_df, self.cfg, tfs=self.train_tfs, mode='train')
+        train_ds = birdnet_dataset(self.train_df, self.birds_df, self.cfg, tfs=self.train_tfs, mode='train')
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -317,7 +344,7 @@ class wav_datamodule(pl.LightningDataModule):
         return train_loader
         
     def val_dataloader(self):
-        val_ds = bird_dataset(self.val_df, self.cfg, tfs=self.val_tfs, mode='val')
+        val_ds = birdnet_dataset(self.val_df, self.birds_df, self.cfg, tfs=self.val_tfs, mode='val')
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -398,7 +425,7 @@ CFG2 = CFG
 CFG2.BATCH_SIZE = 16
 CFG2.num_workers = 2
 
-dm = wav_datamodule(t_df, v_df, cfg=CFG2)
+dm = wav_datamodule(t_df, v_df, birds_df, cfg=CFG2)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
@@ -413,7 +440,7 @@ librosa.display.specshow(x[2].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR, c
 plt.show()
 
 # %%
-dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = wav_datamodule(t_df, v_df, birds_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
@@ -711,6 +738,8 @@ train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
 t_df = meta_df.iloc[train_idx]
 v_df = meta_df.iloc[val_idx]
 
+print(t_df.shape)
+
 if not CFG.USE_SECONDARY:
     t_df = t_df[t_df['secondary_labels'] == '[]']
 
@@ -731,7 +760,7 @@ t_df.shape, v_df.shape
 
 # %%
 # dm = wav_datamodule(t_df,v_df)
-dm = wav_datamodule(t_df, v_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
+dm = wav_datamodule(t_df, v_df, birds_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
 
 # %%
 len(dm.train_dataloader()), len(dm.val_dataloader())
