@@ -1,10 +1,53 @@
+import torch
 import librosa
+import torchaudio
 
 import numpy as np
 import pandas as pd
 
 import plotly.express as px
 import matplotlib.pyplot as plt
+
+def read_wav(path, sr, frame_offset=0, num_frames=-1):
+    wav, org_sr = torchaudio.load(path, normalize=True, frame_offset=frame_offset, num_frames=num_frames)
+    
+    wav = torchaudio.functional.resample(wav, orig_freq=org_sr, new_freq=sr)
+    
+    return wav
+
+def crop_wav(wav, start, duration):
+    while wav.size(-1) < duration:
+        wav = torch.cat([wav, wav], dim=1)
+    
+    wav = wav[:, start:start+duration]
+
+    return wav
+
+def normalize_melspec(X, eps=1e-6):
+    mean = X.mean((1, 2), keepdim=True)
+    std = X.std((1, 2), keepdim=True)
+    Xstd = (X - mean) / (std + eps)
+
+    norm_min, norm_max = (
+        Xstd.min(-1)[0].min(-1)[0],
+        Xstd.max(-1)[0].max(-1)[0],
+    )
+    fix_ind = (norm_max - norm_min) > eps * torch.ones_like(
+        (norm_max - norm_min)
+    )
+    V = torch.zeros_like(Xstd)
+    if fix_ind.sum():
+        V_fix = Xstd[fix_ind]
+        norm_max_fix = norm_max[fix_ind, None, None]
+        norm_min_fix = norm_min[fix_ind, None, None]
+        V_fix = torch.max(
+            torch.min(V_fix, norm_max_fix),
+            norm_min_fix,
+        )
+        V_fix = (V_fix - norm_min_fix) / (norm_max_fix - norm_min_fix)
+        V[fix_ind] = V_fix
+    return V
+
 
 def plot_energy(data, rate, figsize=(14,5)):
     energy = librosa.feature.rms(y=data)
