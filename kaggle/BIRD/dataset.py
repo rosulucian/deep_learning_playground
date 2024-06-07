@@ -10,7 +10,7 @@ import albumentations as A
 from pathlib import Path
 from albumentations.pytorch import ToTensorV2
 
-from util import read_wav, crop_wav, normalize_melspec
+from utils import read_wav, crop_wav, normalize_melspec
 
 sample_submission = pd.read_csv('E:\data\BirdCLEF\sample_submission.csv')
 

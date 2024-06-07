@@ -62,10 +62,9 @@ class birdnet_dataset(torch.utils.data.Dataset):
         start = entry.start
         stop = start + self.duration
 
-        wav = read_wav(filename, self.sr, start * self.sr, stop * self.sr)
-        wav = crop_wav(wav, start * self.sr, self.duration * self.sr)
-
-        print(wav.shape)
+        wav = read_wav(filename, self.sr, start * self.sr, self.duration * self.sr)
+        wav = crop_wav(wav, 0, self.duration * self.sr)
+        
         mel_spectrogram = normalize_melspec(self.db_transform(self.mel_transform(wav)))
         mel_spectrogram = mel_spectrogram * 255
         

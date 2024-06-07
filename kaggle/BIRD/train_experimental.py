@@ -73,7 +73,7 @@ train_dir = Path('E:\data\BirdCLEF')
 
 # %%
 class CFG:
-    project = 'Bird-local-3'
+    project = 'Bird-local-labels'
     comment = 'better-labels'
     
     MIXUP = True
@@ -96,6 +96,9 @@ class CFG:
     UNLABELED_CSV = train_dir / 'predictions.csv'
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
+
+    TRAIN_SET = train_dir / 'train_set.csv'
+    VAL_SET = train_dir / 'val_set.csv'
 
     num_workers = 16
     # Maximum decibel to clip audio to
@@ -185,9 +188,6 @@ meta_df = pd.read_csv(CFG.TRAIN_CSV)
 meta_df.head(2)
 
 # %%
-# meta_df[meta_df['primary_label'] == 'magrob']
-
-# %%
 len(CFG.LABELS)
 
 # %%
@@ -206,83 +206,35 @@ meta_df.iloc[0].filename
 # %%
 meta_df = meta_df[columns]
 
-# %%
-meta_df['range'] = 0
-
-# %%
-cols = ['top_1', 'top_2', 'top_3', 'top_1_idx', 'top_2_idx', 'top_3_idx']
-
-
-# %%
-def get_scores(row):
-    labels = [row.primary_label] + eval(row.secondary_labels)
-    labels[:3]
-    labels = [bird2id[l] for l in labels]
-
-    labels = np.array(labels)
-
-    scores = np.zeros(3)
-    scores[labels] = 1
-    
-    return scores
-
-
-# %%
-get_scores(meta_df.iloc[0])
-
-# %%
-# meta_df[cols[:3]] = meta_df.apply(get_scores, axis='columns', result_type='expand')
-
-# %%
-meta_df.iloc[0].filename
-
-# %%
-meta_df.head(2)
-
-# %%
-ul_df = pd.read_csv(CFG.UNLABELED_CSV)
-print(ul_df.shape)
-ul_df = ul_df[ul_df['top_1'] < CFG.UL_THRESH]
-print(ul_df.shape)
-
-ul_df.head(2)
-
-# %%
-ul_df = ul_df.sample(1000)
-
-# %%
-# ul_df[ul_df['top_2'] > CFG.UL_THRESH].sample(5)
-
-# %%
-# meta_df = pd.concat([meta_df, ul_df.sample(1000)], ignore_index=True)
-
-# %%
-# meta_df.sample(10)
-
 # %% [markdown]
-# ### BIRDNet predictions df
+# ### Load dataset
 
 # %%
-birds_df = pd.read_csv(CFG.birds_csv)
-birds_df.shape, birds_df.head(2)
+train_df = pd.read_csv(train_dir / 'train_set.csv')
+val_df = pd.read_csv(train_dir / 'val_set.csv')
+
+train_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + train_df['label'] + '/' + train_df['filename']
+val_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + train_df['label'] + '/' + val_df['filename']
+
+train_df.shape, val_df.shape
 
 # %%
-birds_df['filename'].value_counts()
+train_df.sample(4)
 
 # %%
+train_df[train_df['label'] != train_df['pred_code']].shape
 
 # %%
-
-# %%
+train_df.iloc[0].start
 
 # %% [markdown]
 # ### Load data
 
 # %%
-from dataset import birdnet_dataset
+from dataset2 import birdnet_dataset
 
 # %%
-dset = birdnet_dataset(meta_df, birds_df, CFG)
+dset = birdnet_dataset(train_df, CFG)
 
 print(dset.__len__())
 
@@ -291,7 +243,10 @@ print(spect.shape, label.shape)
 print(spect.dtype, label.dtype)
 
 # %%
-# interv.intersect.sum()
+label[label.count_nonzero()]
+
+# %%
+label
 
 # %%
 librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
@@ -305,17 +260,16 @@ plt.show()
 # ### Data Module
 
 # %%
-from dataset import birdnet_dataset
+from dataset2 import birdnet_dataset
 
 
 # %%
 class wav_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, birds_df, cfg=CFG, train_tfs=None, val_tfs=None):
+    def __init__(self, train_df, val_df, cfg=CFG, train_tfs=None, val_tfs=None, persistent_workers=True):
         super().__init__()
         
         self.train_df = train_df
         self.val_df = val_df
-        self.birds_df = birds_df
         
         self.train_bs = cfg.BATCH_SIZE
         self.val_bs = cfg.BATCH_SIZE
@@ -326,9 +280,10 @@ class wav_datamodule(pl.LightningDataModule):
         self.cfg = cfg
         
         self.num_workers = cfg.num_workers
+        self.persistent_workers = persistent_workers
         
     def train_dataloader(self):
-        train_ds = birdnet_dataset(self.train_df, self.birds_df, self.cfg, tfs=self.train_tfs, mode='train')
+        train_ds = birdnet_dataset(self.train_df, self.cfg, tfs=self.train_tfs, mode='train')
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -336,14 +291,14 @@ class wav_datamodule(pl.LightningDataModule):
             pin_memory=False,
             drop_last=False,
             shuffle=True,
-            persistent_workers=True,
+            persistent_workers=self.persistent_workers,
             num_workers=self.num_workers,
         )
         
         return train_loader
         
     def val_dataloader(self):
-        val_ds = birdnet_dataset(self.val_df, self.birds_df, self.cfg, tfs=self.val_tfs, mode='val')
+        val_ds = birdnet_dataset(self.val_df, self.cfg, tfs=self.val_tfs, mode='val')
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -357,47 +312,6 @@ class wav_datamodule(pl.LightningDataModule):
         
         return val_loader
 
-
-# %% jupyter={"source_hidden": true}
-# class spectro_datamodule(pl.LightningDataModule):
-#     def __init__(self, train_df, val_df, cfg=CFG):
-#         super().__init__()
-        
-#         self.train_df = train_df
-#         self.val_df = val_df
-        
-#         self.train_bs = cfg.BATCH_SIZE
-#         self.val_bs = cfg.BATCH_SIZE
-        
-#         self.num_workers = cfg.num_workers
-        
-#     def train_dataloader(self):
-#         train_ds = spectro_dataset(self.train_df, X, y)
-        
-#         train_loader = torch.utils.data.DataLoader(
-#             train_ds,
-#             batch_size=self.train_bs,
-#             pin_memory=False,
-#             drop_last=False,
-#             shuffle=True,
-#             num_workers=self.num_workers,
-#         )
-        
-#         return train_loader
-        
-#     def val_dataloader(self):
-#         val_ds = spectro_dataset(self.val_df, X, y)
-        
-#         val_loader = torch.utils.data.DataLoader(
-#             val_ds,
-#             batch_size=self.val_bs,
-#             pin_memory=False,
-#             drop_last=False,
-#             shuffle=False,
-#             num_workers=self.num_workers,
-#         )
-        
-#         return val_loader
 
 # %%
 image_size = CFG.image_size
@@ -416,15 +330,15 @@ val_tfs = A.Compose([
 ])
 
 # %%
-t_df = meta_df[:-100]
+t_df = train_df[:100]
 # t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
-v_df = meta_df[-100:]
+v_df = val_df[:100]
 
-CFG2 = CFG
+CFG2 = CFG()
 CFG2.BATCH_SIZE = 16
-CFG2.num_workers = 2
+CFG2.num_workers = 0
 
-dm = wav_datamodule(t_df, v_df, birds_df, cfg=CFG2)
+dm = wav_datamodule(t_df, v_df, cfg=CFG2, persistent_workers=False)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
@@ -439,7 +353,10 @@ librosa.display.specshow(x[2].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR, c
 plt.show()
 
 # %%
-dm = wav_datamodule(t_df, v_df, birds_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+CFG.num_workers
+
+# %%
+dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
@@ -558,6 +475,9 @@ model = timm.create_model(
     )
 
 model.feature_info.channels(), np.sum(model.feature_info.channels())
+
+# %%
+del model
 
 
 # %%
@@ -699,67 +619,14 @@ foo.shape
 # ### Split
 
 # %%
-from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
-
-
-# %%
-def upsample_data(df, thr=20):
-    # get the class distribution
-    class_dist = df['primary_label'].value_counts()
-
-    # identify the classes that have less than the threshold number of samples
-    down_classes = class_dist[class_dist < thr].index.tolist()
-
-    # create an empty list to store the upsampled dataframes
-    up_dfs = []
-
-    # loop through the undersampled classes and upsample them
-    for c in down_classes:
-        # get the dataframe for the current class
-        class_df = df.query("primary_label==@c")
-        # find number of samples to add
-        num_up = thr - class_df.shape[0]
-        # upsample the dataframe
-        class_df = class_df.sample(n=num_up, replace=True, random_state=CFG.random_seed)
-        # append the upsampled dataframe to the list
-        up_dfs.append(class_df)
-
-    # concatenate the upsampled dataframes and the original dataframe
-    up_df = pd.concat([df] + up_dfs, axis=0, ignore_index=True)
-    
-    return up_df
-
-
-# %%
-sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
-train_idx, val_idx = next(sss.split(meta_df.filename, meta_df.primary_label))
-
-t_df = meta_df.iloc[train_idx]
-v_df = meta_df.iloc[val_idx]
-
-print(t_df.shape)
-
-if not CFG.USE_SECONDARY:
-    t_df = t_df[t_df['secondary_labels'] == '[]']
-
-if CFG.USE_UPSAMPLE:
-    t_df = upsample_data(t_df, thr=CFG.up_thr)
-
-if CFG.USE_UL:
-    t_df = pd.concat([t_df, ul_df], ignore_index=True)
-
-t_df.shape, v_df.shape
-
-# %%
-# t_df = t_df[t_df['rating'] > 1]
-# t_df.shape
+train_df.shape, val_df.shape
 
 # %% [markdown]
 # ### Train
 
 # %%
 # dm = wav_datamodule(t_df,v_df)
-dm = wav_datamodule(t_df, v_df, birds_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
+dm = wav_datamodule(train_df, val_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
 
 # %%
 len(dm.train_dataloader()), len(dm.val_dataloader())
