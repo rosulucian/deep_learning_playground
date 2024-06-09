@@ -74,7 +74,7 @@ train_dir = Path('E:\data\BirdCLEF')
 # %%
 class CFG:
     project = 'Bird-local-3'
-    comment = 'clean'
+    comment = 'clean-10'
     
     MIXUP = True
     USE_SCHD = False
@@ -97,7 +97,7 @@ class CFG:
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
 
-    num_workers = 16
+    num_workers = 8
     # Maximum decibel to clip audio to
     # TOP_DB = 100
     TOP_DB = 80
@@ -119,7 +119,7 @@ class CFG:
     BATCH_SIZE = 128
 
     ### Optimizer
-    N_EPOCHS = 30
+    N_EPOCHS = 240
     WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
     
@@ -221,6 +221,9 @@ print(spect.shape, label.shape)
 print(spect.dtype, label.dtype)
 
 # %%
+label.sum()
+
+# %%
 # interv.intersect.sum()
 
 # %%
@@ -293,8 +296,9 @@ image_size = CFG.image_size
 train_tfs = A.Compose([
     # A.HorizontalFlip(p=0.5),
     A.Resize(image_size, image_size),
+    A.GaussNoise(p=0.5),
+    # A.XYMasking(num_masks_x=4, num_masks_y=2, mask_x_length=26, mask_y_length=26, p=0.7),
     A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
-    # A.CoarseDropout(max_height=int(image_size * 0.17), max_width=int(image_size * 0.17), max_holes=2, p=0.7),
     A.Normalize()
 ])
 
@@ -308,7 +312,7 @@ t_df = meta_df[:-100]
 # t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
 v_df = meta_df[-100:]
 
-CFG2 = CFG
+CFG2 = CFG()
 CFG2.BATCH_SIZE = 16
 CFG2.num_workers = 2
 
@@ -334,6 +338,14 @@ x.shape, y.shape, x.dtype, y.dtype
 
 # %%
 librosa.display.specshow(x[0].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
+plt.show()
+
+# %%
+librosa.display.specshow(x[1].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
+plt.show()
+
+# %%
+librosa.display.specshow(x[2].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR)
 plt.show()
 
 # %%
@@ -643,12 +655,34 @@ t_df.shape, v_df.shape
 # t_df.shape
 
 # %%
+short_df = t_df[t_df['duration'] < 10]
+short_df.shape, short_df.primary_label.nunique()
 
 # %%
+short_labels = short_df.primary_label.unique().tolist()
+
+missing = list(set(CFG.LABELS) - set(short_labels))
+extra = list(set(short_labels) - set(CFG.LABELS))
+
+len(short_labels), len(missing), len(extra)
 
 # %%
+missing
 
 # %%
+missing_df = t_df[t_df['primary_label'].isin(missing)]
+missing_df.primary_label.value_counts()
+
+# %%
+foo_df = missing_df[missing_df['duration'] < 40]
+foo_df.shape, foo_df.primary_label.value_counts()
+
+# %%
+t_df.shape, short_df.shape, foo_df.shape
+
+# %%
+t_df = pd.concat([short_df, foo_df], axis=0)
+t_df.shape
 
 # %%
 
@@ -657,7 +691,7 @@ t_df.shape, v_df.shape
 
 # %%
 # dm = wav_datamodule(t_df,v_df)
-dm = wav_datamodule(t_df, v_df, birds_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
+dm = wav_datamodule(t_df, v_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
 
 # %%
 CFG.BATCH_SIZE
@@ -690,8 +724,19 @@ loss_ckpt = pl.callbacks.ModelCheckpoint(
     auto_insert_metric_name=False,
     dirpath=CFG.CKPT_DIR / run_name,
     filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
+    every_n_epochs=8,
     save_top_k=2,
     mode='min',
+)
+
+loss_ckpt2 = pl.callbacks.ModelCheckpoint(
+    # monitor='val/loss',
+    # auto_insert_metric_name=False,
+    dirpath=CFG.CKPT_DIR / run_name,
+    # filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
+    every_n_epochs=8,
+    # save_top_k=2,
+    # mode='min',
 )
 
 # %%
@@ -718,9 +763,9 @@ trainer = pl.Trainer(
     default_root_dir=CFG.RESULTS_DIR,
     gradient_clip_val=0.5, 
     # gradient_clip_algorithm="value",
+    check_val_every_n_epoch=5,
     logger=wandb_logger,
     callbacks=[loss_ckpt, acc_ckpt, lr_monitor],
-    
 )
 
 # %%
