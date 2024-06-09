@@ -107,6 +107,9 @@ recording.detections
 recording.path, recording.path.split('/')[0].split('\\')[-1]
 
 # %%
+recording.duration
+
+# %%
 label = recording.path.split('/')[0].split('\\')[-1]
 
 # for det in recording.detections:
@@ -114,6 +117,9 @@ label = recording.path.split('/')[0].split('\\')[-1]
 data = [(label, x['start_time'], x['end_time']) for x in recording.detections]
 
 data[0]
+
+# %%
+type(recording)
 
 # %%
 recording.duration
@@ -127,14 +133,13 @@ def on_analyze_directory_complete(recordings, file=train_dir / "bird_preds.csv")
         if rec.error:
             print(f'{rec.error_message} in {rec.path}')
         else:
+            # print(filename, label)
+            
             filename= rec.path.split('\\')[-1]
             label = rec.path.split('\\')[-2]
             
-            # print(filename, label)
-            duration = rec.duration
-            
-            data = [(filename, label, x['scientific_name'], x['start_time'], x['end_time'], duration, x['confidence']) for x in rec.detections]
-            preds.append(pd.DataFrame(data, columns = ['filename', 'label', 'name', 'start', 'end', 'duration', 'confidence']))
+            data = [(filename, label, x['scientific_name'], x['start_time'], x['end_time'], x['confidence']) for x in rec.detections]
+            preds.append(pd.DataFrame(data, columns = ['filename', 'label', 'name', 'start', 'end', 'confidence']))
 
     print(len(preds))
 
@@ -154,6 +159,7 @@ batch = DirectoryMultiProcessingAnalyzer(
     directory,
     analyzers=[analyzer],
     patterns=["*/*.ogg"],
+    # patterns=["asbfly/*.ogg"],
     # lon=-120.7463,
     # lat=35.4244,
     # # date=datetime(year=2022, month=5, day=10),
@@ -180,9 +186,10 @@ def unlabeled_complete(recordings, file= train_dir / "unlabeled_preds.csv"):
         if rec.error:
             print(f'{rec.error_message} in {rec.path}')
         else:
-            filename = rec.path.split('\\')[-1]
+            # print(filename, label)
             
-            # print(filename)
+            filename = rec.path.split('\\')[-1]
+        
             print(len(rec.detections))
             
             data = [(filename, x['scientific_name'], x['start_time'], x['end_time'], x['confidence']) for x in rec.detections]
