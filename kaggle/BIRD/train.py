@@ -359,47 +359,6 @@ class wav_datamodule(pl.LightningDataModule):
         return val_loader
 
 
-# %% jupyter={"source_hidden": true}
-# class spectro_datamodule(pl.LightningDataModule):
-#     def __init__(self, train_df, val_df, cfg=CFG):
-#         super().__init__()
-        
-#         self.train_df = train_df
-#         self.val_df = val_df
-        
-#         self.train_bs = cfg.BATCH_SIZE
-#         self.val_bs = cfg.BATCH_SIZE
-        
-#         self.num_workers = cfg.num_workers
-        
-#     def train_dataloader(self):
-#         train_ds = spectro_dataset(self.train_df, X, y)
-        
-#         train_loader = torch.utils.data.DataLoader(
-#             train_ds,
-#             batch_size=self.train_bs,
-#             pin_memory=False,
-#             drop_last=False,
-#             shuffle=True,
-#             num_workers=self.num_workers,
-#         )
-        
-#         return train_loader
-        
-#     def val_dataloader(self):
-#         val_ds = spectro_dataset(self.val_df, X, y)
-        
-#         val_loader = torch.utils.data.DataLoader(
-#             val_ds,
-#             batch_size=self.val_bs,
-#             pin_memory=False,
-#             drop_last=False,
-#             shuffle=False,
-#             num_workers=self.num_workers,
-#         )
-        
-#         return val_loader
-
 # %%
 image_size = CFG.image_size
 
@@ -761,6 +720,9 @@ t_df.shape, v_df.shape
 # %%
 # dm = wav_datamodule(t_df,v_df)
 dm = wav_datamodule(t_df, v_df, birds_df, CFG, train_tfs=train_tfs, val_tfs=val_tfs) 
+
+# %%
+CFG.BATCH_SIZE
 
 # %%
 len(dm.train_dataloader()), len(dm.val_dataloader())
