@@ -57,7 +57,8 @@ class birdnet_dataset(torch.utils.data.Dataset):
     
     def __getitem__(self, index: int):
         entry = self.df.iloc[index]
-        filename = entry.filename
+        # filename = entry.filename
+        filename = entry.path
 
         info = torchaudio.info(filename)
         length = int(info.num_frames / self.sr)
