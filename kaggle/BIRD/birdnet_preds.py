@@ -43,6 +43,8 @@ train_dir = Path('E:\data\BirdCLEF')
 class CFG:
     random_seed = 42
 
+    include_ul = True
+    
     split_fraction = 0.95
     
     ROOT_FOLDER = train_dir
@@ -84,6 +86,23 @@ print(meta_df.filename.duplicated().sum())
 meta_df['file'] = meta_df.apply(lambda row: row.filename.split('/')[-1], axis=1)
 
 # %%
+all_files = meta_df.filename.unique().tolist()
+len(all_files)
+
+# %%
+# durations = {}
+# for f in all_files:
+#     filename = CFG.AUDIO_FOLDER / f
+#     info = torchaudio.info(filename)
+#     duration = int(info.num_frames / info.sample_rate )
+
+#     durations[f] = duration
+
+# meta_df['duration'] = meta_df.apply(lambda row: durations[row['filename']], axis=1)
+
+# meta_df.to_csv(CFG.TRAIN_CSV, index=False) 
+
+# %%
 meta_df.head(2)
 
 # %%
@@ -105,6 +124,15 @@ sci2code['Struthio camelus'], code2sci['ostric2']
 # ### BirdNet train predictions
 
 # %%
+bird_preds_df.sample(2)
+
+# %%
+# bird_preds_df['path'] = fr'{str(CFG.AUDIO_FOLDER)}/' + bird_preds_df['label'] + '/' + bird_preds_df['filename']
+
+# %%
+# bird_preds_df[bird_preds_df['filename'] == 'XC496054.ogg']
+
+# %%
 bird_preds_df.sample(4)
 
 # %%
@@ -122,6 +150,9 @@ ood_list = bird_preds_df[bird_preds_df['ood'] == True].pred_code.unique().tolist
 len(ood_list)
 
 # %%
+bird_preds_df[bird_preds_df['duration'] != -1]
+
+# %%
 bird_preds_df.sample(2)
 
 # %%
@@ -131,17 +162,29 @@ bird_preds_df.label.value_counts()[:15]
 # ### Unlabeled soundscapes
 
 # %%
-unlabeled_preds_df.sample(4)
+unlabeled_preds_df.sample(2)
 
 # %%
 unlabeled_preds_df['pred_code'] = unlabeled_preds_df.apply(lambda row: sci2code[row['name']] if row['name'] in sci2code.keys() else '', axis=1)
+unlabeled_preds_df['label'] = unlabeled_preds_df['pred_code']
 unlabeled_preds_df['ood'] = unlabeled_preds_df.apply(lambda row: False if row['pred_code'] in bird2id.keys() else True, axis=1)
+
+# %%
+unlabeled_preds_df['path'] = fr'{str(CFG.UNLABELED_FOLDER)}/' + unlabeled_preds_df['filename']
+
+# %%
+unlabeled_preds_df.sample(2)
 
 # %%
 unlabeled_preds_df.shape, unlabeled_preds_df[unlabeled_preds_df['pred_code'] == ''].shape
 
 # %%
-unlabeled_preds_df[unlabeled_preds_df['ood'] == True].shape
+unlabeled_preds_df[unlabeled_preds_df['ood'] == False].shape
+
+# %%
+
+# %%
+unlabeled_preds_df[unlabeled_preds_df['ood'] == False].sample(4)
 
 # %%
 
@@ -180,7 +223,7 @@ counts[counts > 1000].count(), counts[counts < 50].count(), counts[counts < 10].
 # %%
 ood_df = bird_preds_df[bird_preds_df['ood'] == False]
 counts = ood_df.pred_code.value_counts()
-counts[counts > 1000].count(), counts[counts < 50].count(), counts[counts < 10].count(), len(CFG.LABELS
+counts[counts > 1000].count(), counts[counts < 50].count(), counts[counts < 10].count(), len(CFG.LABELS)
 
 # %%
 bird_preds_df.shape,  ood_df.shape
@@ -189,7 +232,10 @@ bird_preds_df.shape,  ood_df.shape
 # bird_preds_df.label.value_counts()[-20:]
 
 # %%
-# bird_preds_df[bird_preds_df['label'] == 'asiope1']
+bird_preds_df[bird_preds_df['filename'] == 'XC49755.ogg']
+
+# %%
+bird_preds_df[bird_preds_df['label'] != bird_preds_df['pred_code']]
 
 # %%
 # meta_df[meta_df['secondary_labels'] == '[]'].primary_label.value_counts()
@@ -254,6 +300,10 @@ t_df = meta_df.iloc[train_idx]
 v_df = meta_df.iloc[val_idx]
 
 t_df.shape, v_df.shape
+
+# %%
+files = t_df.filename.tolist()
+v_df.apply(lambda row: row['filename'] in files, axis=1).sum()
 
 # %%
 # Use only classes that are in distribution (western ghats)
@@ -324,7 +374,7 @@ len(results), df.isnull().values.any()
 results_df = pd.concat(results, axis=0)
 print(results_df.shape)
 
-results_df.sample(5)
+results_df.sample(2)
 
 # %%
 df.head(2)
@@ -332,6 +382,15 @@ df.head(2)
 # %%
 df = pd.concat([df,results_df], axis=0)
 df.shape
+
+# %%
+df['start'] = df['start'].astype(int)
+df['end'] = df['end'].astype(int)
+
+df['path'] = fr'{str(CFG.AUDIO_FOLDER)}/' + df['label'] + '/' + df['filename']
+
+# %%
+df.head(2)
 
 # %%
 labels_pred = bird_preds_df.pred_code.unique().tolist()
@@ -366,6 +425,34 @@ val_df = df[df.filename.isin(val_files)]
 train_df.shape, val_df.shape, df.shape
 
 # %% [markdown]
+# ### Add unlabeled
+
+# %%
+unl_df = unlabeled_preds_df[unlabeled_preds_df['ood'] == False]
+unl_df.shape
+
+# %%
+# unl_df['label'] = unl_df['pred_code']
+
+# %%
+train_df.head(2)
+
+# %%
+unl_df.head(2)
+
+# %%
+print(train_df.shape)
+
+if CFG.include_ul:
+    train_df = pd.concat([train_df, unl_df], axis=0)
+
+print(train_df.shape)
+
+# %%
+
+# %%
+
+# %% [markdown]
 # ### Up/down sample train dataset
 
 # %%
@@ -374,8 +461,8 @@ train_df.shape, val_df.shape, df.shape
 # label = 'label'
 label = 'pred_code'
 
-up_thr = 100
-down_thr = 300
+up_thr = 150
+down_thr = 400
 # pre downsample for graphical reasons, remove very high classes
 # pre_df = bird_preds_df[bird_preds_df['ood'] == False]
 pre_df = train_df
@@ -405,8 +492,13 @@ plt.title("Upsample for Pre-Training")
 plt.show()
 
 # %%
+up_df.shape, val_df.shape
+
+# %%
 # Save datasets
 up_df.to_csv(train_dir / "train_set.csv", index=False) 
 val_df.to_csv(train_dir / "val_set.csv", index=False) 
+
+# %%
 
 # %%
