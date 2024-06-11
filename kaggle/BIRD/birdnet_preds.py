@@ -103,6 +103,18 @@ len(all_files)
 # meta_df.to_csv(CFG.TRAIN_CSV, index=False) 
 
 # %%
+meta_df[meta_df['duration'] > 60].shape, meta_df['duration'].max()
+
+# %%
+meta_df[meta_df['duration'] < 7].shape, meta_df[meta_df['duration'] < 7].primary_label.nunique()
+
+# %%
+meta_df[(meta_df['duration'] < 7) & (meta_df['secondary_labels'] == '[]')].primary_label.nunique()
+
+# %%
+meta_df[meta_df['duration'] < 7].sample(2)
+
+# %%
 meta_df.head(2)
 
 # %%

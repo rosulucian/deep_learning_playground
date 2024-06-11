@@ -20,22 +20,27 @@ import numpy as np
 df_path = "E:\data\BirdCLEF\submission.csv"
 sub_path = 'E:\data\BirdCLEF\sample_submission.csv'
 
+USE_MISSING_LABELS = True
+
 # %%
 df = pd.read_csv(df_path)
 sample_submission = pd.read_csv(sub_path)
 df.shape
 
 # %%
+sec_labels = ['lotshr1', 'orhthr1', 'magrob', 'indwhe1', 'bltmun1', 'asfblu1']
+
 target_columns = sample_submission.columns[1:].tolist()
+if USE_MISSING_LABELS:
+    target_columns += sec_labels
+
 num_classes = len(target_columns)
 bird2id = {b: i for i, b in enumerate(target_columns)}
 
+num_classes
+
 # %%
 # bird2id['magrob']
-
-# %%
-
-# %%
 
 # %%
 df['name'] = df.label.apply(lambda row: target_columns[row])

@@ -74,7 +74,7 @@ train_dir = Path('E:\data\BirdCLEF')
 # %%
 class CFG:
     project = 'Bird-local-labels'
-    comment = 'labels-random'
+    comment = 'img192-xy-topdb60'
     
     MIXUP = True
     USE_SCHD = False
@@ -100,17 +100,17 @@ class CFG:
     TRAIN_SET = train_dir / 'train_set.csv'
     VAL_SET = train_dir / 'val_set.csv'
 
-    num_workers = 12
+    num_workers = 8
     # Maximum decibel to clip audio to
     # TOP_DB = 100
-    TOP_DB = 80
+    TOP_DB = 60
     # Minimum rating
     MIN_RATING = 3.0
     # Sample rate as provided in competition description
     # SR = 32000
     SR = 32000
 
-    image_size = 128
+    image_size = 192
     
     ### split train and validation sets
     split_fraction = 0.95
@@ -213,8 +213,8 @@ meta_df = meta_df[columns]
 train_df = pd.read_csv(train_dir / 'train_set.csv')
 val_df = pd.read_csv(train_dir / 'val_set.csv')
 
-train_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + train_df['label'] + '/' + train_df['filename']
-val_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + val_df['label'] + '/' + val_df['filename']
+# train_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + train_df['label'] + '/' + train_df['filename']
+# val_df['filename'] = fr'{str(CFG.AUDIO_FOLDER)}/' + val_df['label'] + '/' + val_df['filename']
 
 train_df.shape, val_df.shape
 
@@ -252,7 +252,7 @@ print(spect.dtype, label.dtype)
 label[label.count_nonzero()]
 
 # %%
-label
+label.sum()
 
 # %%
 librosa.display.specshow(spect[0].numpy(), y_axis="mel", x_axis='s', sr=CFG.SR, cmap='gray')
@@ -325,8 +325,8 @@ image_size = CFG.image_size
 train_tfs = A.Compose([
     # A.HorizontalFlip(p=0.5),
     A.Resize(image_size, image_size),
-    A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
-    # A.CoarseDropout(max_height=int(image_size * 0.17), max_width=int(image_size * 0.17), max_holes=2, p=0.7),
+    A.XYMasking(num_masks_x=(1,4), num_masks_y=(1,3), mask_x_length=(8,16), mask_y_length=(8,18), p=0.7),
+    # A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
     A.Normalize()
 ])
 
@@ -362,7 +362,7 @@ plt.show()
 CFG.num_workers
 
 # %%
-dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = wav_datamodule(t_df, v_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs, persistent_workers=False)
 
 x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
@@ -663,9 +663,19 @@ loss_ckpt = pl.callbacks.ModelCheckpoint(
     auto_insert_metric_name=False,
     dirpath=CFG.CKPT_DIR / run_name,
     filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
-    every_n_epochs=8,
+    # every_n_epochs=8,
     save_top_k=2,
     mode='min',
+)
+
+loss_ckpt2 = pl.callbacks.ModelCheckpoint(
+    # monitor='val/loss',
+    # auto_insert_metric_name=False,
+    dirpath=CFG.CKPT_DIR / run_name,
+    # filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
+    every_n_epochs=8,
+    # save_top_k=2,
+    # mode='min',
 )
 
 # %%
@@ -693,7 +703,7 @@ trainer = pl.Trainer(
     gradient_clip_val=0.5, 
     # gradient_clip_algorithm="value",
     logger=wandb_logger,
-    callbacks=[loss_ckpt, acc_ckpt, lr_monitor],
+    callbacks=[loss_ckpt, loss_ckpt2, acc_ckpt, lr_monitor],
     
 )
 
