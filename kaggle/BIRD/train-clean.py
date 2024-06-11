@@ -74,13 +74,13 @@ train_dir = Path('E:\data\BirdCLEF')
 # %%
 class CFG:
     project = 'Bird-local-3'
-    comment = 'clean-10'
+    comment = 'clean-size192-topdb60'
     
     MIXUP = True
     USE_SCHD = False
     USE_UL = False
     # USE_MISSING_LABELS = False
-    USE_SECONDARY = False
+    USE_SECONDARY = True
     USE_MISSING_LABELS = USE_SECONDARY
     USE_UPSAMPLE = False
 
@@ -100,14 +100,15 @@ class CFG:
     num_workers = 8
     # Maximum decibel to clip audio to
     # TOP_DB = 100
-    TOP_DB = 80
+    TOP_DB = 60
     # Minimum rating
     MIN_RATING = 3.0
     # Sample rate as provided in competition description
     # SR = 32000
     SR = 32000
 
-    image_size = 128
+    image_size_x = 128
+    image_size_y = 192
     
     ### split train and validation sets
     split_fraction = 0.95
@@ -291,19 +292,20 @@ class wav_datamodule(pl.LightningDataModule):
 
 
 # %%
-image_size = CFG.image_size
+image_size_x = CFG.image_size_x
+image_size_y = CFG.image_size_y
 
 train_tfs = A.Compose([
     # A.HorizontalFlip(p=0.5),
-    A.Resize(image_size, image_size),
-    A.GaussNoise(p=0.5),
-    # A.XYMasking(num_masks_x=4, num_masks_y=2, mask_x_length=26, mask_y_length=26, p=0.7),
-    A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
+    A.Resize(image_size_x, image_size_y),
+    # A.GaussNoise(var_limit=0.2, mean=1, p=0.5),
+    A.XYMasking(num_masks_x=(1,4), num_masks_y=(1,3), mask_x_length=(8,16), mask_y_length=(8,18), p=0.7),
+    # A.CoarseDropout(max_height=int(image_size * 0.375), max_width=int(image_size * 0.375), max_holes=1, p=0.7),
     A.Normalize()
 ])
 
 val_tfs = A.Compose([
-    A.Resize(image_size, image_size),
+    A.Resize(image_size_x, image_size_y),
     A.Normalize()
 ])
 
@@ -331,7 +333,7 @@ librosa.display.specshow(x[2].numpy()[0], y_axis="mel", x_axis='s', sr=CFG.SR, c
 plt.show()
 
 # %%
-dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = wav_datamodule(t_df, v_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
@@ -602,7 +604,7 @@ foo.shape
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
 
 
-# %%
+# %% jupyter={"source_hidden": true}
 def upsample_data(df, thr=20):
     # get the class distribution
     class_dist = df['primary_label'].value_counts()
@@ -651,18 +653,35 @@ if CFG.USE_UL:
 t_df.shape, v_df.shape
 
 # %%
+CFG.USE_SECONDARY
+
+# %%
 # t_df = t_df[t_df['rating'] > 1]
 # t_df.shape
 
 # %%
-short_df = t_df[t_df['duration'] < 10]
+short_df = t_df[t_df['duration'] < 8]
 short_df.shape, short_df.primary_label.nunique()
+
+# %%
+short_df[short_df['secondary_labels'] != '[]'].shape
+
+# %%
+secondary = short_df[short_df['secondary_labels'] != '[]'].secondary_labels.tolist()
+secondary = [y for x in secondary for y in eval(x)]
+# secondary = [x for x in secondary if x in CFG.LABELS]
+secondary = set(secondary)
+len(secondary)
+
+# %%
+len(CFG.LABELS)
 
 # %%
 short_labels = short_df.primary_label.unique().tolist()
 
 missing = list(set(CFG.LABELS) - set(short_labels))
 extra = list(set(short_labels) - set(CFG.LABELS))
+# sec = list(secondary - set(missing))
 
 len(short_labels), len(missing), len(extra)
 
@@ -734,7 +753,7 @@ loss_ckpt2 = pl.callbacks.ModelCheckpoint(
     # auto_insert_metric_name=False,
     dirpath=CFG.CKPT_DIR / run_name,
     # filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
-    every_n_epochs=8,
+    every_n_epochs=50,
     # save_top_k=2,
     # mode='min',
 )
@@ -765,7 +784,7 @@ trainer = pl.Trainer(
     # gradient_clip_algorithm="value",
     check_val_every_n_epoch=5,
     logger=wandb_logger,
-    callbacks=[loss_ckpt, acc_ckpt, lr_monitor],
+    callbacks=[loss_ckpt, loss_ckpt2, acc_ckpt, lr_monitor],
 )
 
 # %%

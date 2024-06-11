@@ -261,6 +261,10 @@ class bird_dataset2(torch.utils.data.Dataset):
         label = entry.primary_label
         target[self.bird2id[label]] = 1
 
+        for l in eval(entry.secondary_labels):      
+            if l != "" and (l in target_columns or self.use_missing):
+                target[self.bird2id[l]] = 1
+
         target = torch.from_numpy(target).float()
         
         return spect, target
