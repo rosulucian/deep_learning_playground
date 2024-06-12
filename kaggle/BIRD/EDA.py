@@ -79,6 +79,18 @@ meta_df[meta_df['filename'] == 'spemou2/XC368137.ogg']
 meta_df.head(2)
 
 # %%
+meta_df.file.value_counts()
+
+# %%
+meta_df[meta_df.file == 'XC503389.ogg']
+
+# %%
+meta_df.file.duplicated().sum()
+
+# %%
+meta_df[meta_df.file.duplicated()]
+
+# %%
 meta_df[meta_df['scientific_name'].str.contains('Alauda gulgula')]
 
 # %%
