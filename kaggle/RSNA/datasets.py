@@ -123,6 +123,9 @@ coords_df['condition'] = coords_df.apply(lambda row: ''.join([w[0] for w in row[
 coords_df['level'] = coords_df.level.apply(lambda l: ''.join(l.split('/')))
 
 # %%
+coords_df['cl'] = coords_df['condition'] + coords_df['level']
+
+# %%
 coords_df.condition.nunique()
 
 # %%
@@ -152,10 +155,10 @@ coords_df.id.nunique()
 # ### Save results
 
 # %%
-train_df.to_csv(CFG.DEST_FOLDER / 'train.csv')
+train_df.to_csv(CFG.DEST_FOLDER / 'train.csv', index=False)
 
 # %%
-coords_df.to_csv(CFG.DEST_FOLDER / 'train_label_coordinates.csv')
+coords_df.to_csv(CFG.DEST_FOLDER / 'train_label_coordinates.csv', index=False)
 
 # %%
 
