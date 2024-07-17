@@ -61,7 +61,9 @@ train_df.study_id.nunique()
 
 # %%
 coords_df = pd.read_csv(CFG.COORDS_CSV)
-coords_df.shape
+files_df = pd.read_csv(CFG.FILES_CSV)
+
+coords_df.shape, files_df.shape
 
 # %%
 coords_df.study_id.nunique(), coords_df.condition.nunique(), coords_df.level.nunique()
@@ -75,6 +77,15 @@ coords_df.series_id.nunique()
 # %%
 coords_df['id'] = coords_df.apply(lambda row: str(row['study_id']) + str(row['series_id']), axis=1)
 train_desc_df['id'] = train_desc_df.apply(lambda row: str(row['study_id']) + str(row['series_id']), axis=1)
+
+# %%
+coords_df.sample(2)
+
+# %%
+coords_df['condition'] = coords_df.apply(lambda row: ''.join([w[0] for w in row['condition'].split(' ')]), axis=1)
+
+# %%
+coords_df.condition.nunique()
 
 # %%
 coords_df.head(10)
@@ -100,8 +111,14 @@ coords_df[(coords_df.condition == 'Spinal Canal Stenosis') & (coords_df.plane !=
 coords_df.groupby(['study_id','series_id']).instance_number.unique()
 
 # %%
+coords_df.id.nunique()
+
+# %%
 pos_slices = coords_df.groupby(['study_id','series_id']).instance_number.unique().apply(list).reset_index(name='slice').explode('slice')
 pos_slices.shape
+
+# %%
+# coords_df[coords_df.instance_number > 100]
 
 # %%
 pos_slices
@@ -131,14 +148,13 @@ pd.crosstab(coords_df.condition, coords_df.level)
 # ### Files
 
 # %%
-files_df = pd.read_csv(CFG.FILES_CSV)
-files_df.shape
-
-# %%
 files_df.head(3)
 
 # %%
-files_df.image.max(), files_df.image.mean()
+files_df.rows.min(), files_df.rows.max(), files_df['columns'].min(), files_df['columns'].max(), 
+
+# %%
+# files_df.image.max(), files_df.image.mean()
 
 # %%
 # file names do not correspond to file count
@@ -151,6 +167,19 @@ files_df.groupby(['patient','series']).image.count().max(), files_df.groupby(['p
 # %%
 # mean positive imgs per series
 coords_df.groupby(['study_id','series_id']).instance_number.nunique().mean()
+
+# %%
+files_df.groupby(['patient','series']).series.count()
+
+# %% [markdown]
+# ### Analyze one example
+
+# %%
+patient = 4003253
+train_df[train_df['study_id'] == patient].iloc[0]
+
+# %%
+coords_df[coords_df['study_id'] == patient]
 
 # %%
 
