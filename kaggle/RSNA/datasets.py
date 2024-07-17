@@ -71,7 +71,7 @@ train_df.rename(columns=dict(zip(train_df.columns, cols)), inplace=True)
 train_df.shape
 
 # %%
-train_df.iloc[1]
+train_df.iloc[0]
 
 # %%
 train_df.study_id.nunique()
