@@ -148,7 +148,14 @@ coords_df.groupby(['study_id','series_id']).instance.unique()
 # %%
 coords_df.id.nunique()
 
+# %% [markdown]
+# ### Save results
+
 # %%
+train_df.to_csv(CFG.DEST_FOLDER / 'train.csv')
+
+# %%
+coords_df.to_csv(CFG.DEST_FOLDER / 'train_label_coordinates.csv')
 
 # %%
 

@@ -82,33 +82,18 @@ train_desc_df['id'] = train_desc_df.apply(lambda row: str(row['study_id']) + str
 coords_df.sample(2)
 
 # %%
-coords_df['condition'] = coords_df.apply(lambda row: ''.join([w[0] for w in row['condition'].split(' ')]), axis=1)
-
-# %%
-coords_df.condition.nunique()
-
-# %%
-coords_df.head(10)
-
-# %%
-# coords_df[coords_df.study_id == 4003253]
-
-# %%
 train_desc_df[train_desc_df['id'] == '4003253702807833'].series_description.values[0]
-
-# %%
-coords_df['plane'] = coords_df.apply(lambda row: train_desc_df[train_desc_df['id'] == row['id']].series_description.values[0], axis=1)
 
 # %%
 coords_df.sample(5)
 
 # %%
 # check canal stenosis is noy only in axial plane
-coords_df[(coords_df.condition == 'Spinal Canal Stenosis') & (coords_df.plane != 'Axial T2')].sample()
+coords_df[(coords_df.condition == 'SCS') & (coords_df.plane != 'Axial T2')].sample()
 
 # %%
 # get the positive slices
-coords_df.groupby(['study_id','series_id']).instance_number.unique()
+coords_df.groupby(['study_id','series_id']).instance.unique()
 
 # %%
 coords_df.id.nunique()
