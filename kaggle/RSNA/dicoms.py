@@ -139,7 +139,7 @@ data[:10]
 # list(zip(*foo))
 
 # %%
-files_df = pd.DataFrame(data, columns=['patient', 'series', 'image', 'rows', 'columns'])
+files_df = pd.DataFrame(data, columns=['study_id', 'series_id', 'instance', 'rows', 'columns'])
 files_df.shape
 
 # %%

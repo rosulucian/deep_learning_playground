@@ -29,9 +29,12 @@ train_dir = Path('E:\data\RSNA2024')
 # %%
 class CFG:
     random_seed = 42
+
+    image_size = 256
     
     ROOT_FOLDER = train_dir / 'original'
     DEST_FOLDER = train_dir
+    PNG_DIR = ROOT_FOLDER / f'pngs_{image_size}'
     IMAGES_DIR = ROOT_FOLDER / 'train_images'
     TRAIN_CSV = ROOT_FOLDER / 'train.csv'
     FILES_CSV = ROOT_FOLDER / 'train_files.csv'
@@ -45,6 +48,7 @@ class CFG:
 # %%
 train_df = pd.read_csv(CFG.TRAIN_CSV)
 train_desc_df = pd.read_csv(CFG.TRAIN_DESC_CSV)
+files_df = pd.read_csv(CFG.FILES_CSV)
 
 train_df.shape, train_desc_df.shape
 
@@ -108,7 +112,9 @@ coords_df.condition.unique(), coords_df.level.unique()
 coords_df.series_id.nunique()
 
 # %%
-coords_df['id'] = coords_df.apply(lambda row: str(row['study_id']) + str(row['series_id']), axis=1)
+coords_df['ss_id'] = coords_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
+coords_df['instance_id'] = coords_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}_{str(row["instance"])}', axis=1)
+
 train_desc_df['id'] = train_desc_df.apply(lambda row: str(row['study_id']) + str(row['series_id']), axis=1)
 
 # %%
@@ -152,6 +158,23 @@ coords_df.groupby(['study_id','series_id']).instance.unique()
 coords_df.id.nunique()
 
 # %% [markdown]
+# ### Files
+
+# %%
+files_df.rename(columns={'patient': 'study_id', 'series': 'series_id', 'image': 'instance'}, inplace=True)
+
+# %%
+files_df['ss_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
+files_df['instance_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}_{str(row["instance"])}', axis=1)
+
+# %%
+source_dir = CFG.PNG_DIR
+files_df['filename'] = files_df.apply(lambda row: f'{source_dir}\\{row.study_id}_{row.series_id}_{row.image}.png', axis=1)
+
+# %%
+files_df.sample()
+
+# %% [markdown]
 # ### Save results
 
 # %%
@@ -161,5 +184,6 @@ train_df.to_csv(CFG.DEST_FOLDER / 'train.csv', index=False)
 coords_df.to_csv(CFG.DEST_FOLDER / 'train_label_coordinates.csv', index=False)
 
 # %%
+files_df.to_csv(CFG.DEST_FOLDER / 'train_files.csv', index=False)
 
 # %%
