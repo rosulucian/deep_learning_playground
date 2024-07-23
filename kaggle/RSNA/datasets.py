@@ -43,7 +43,7 @@ class CFG:
 
 
 # %% [markdown]
-# ### Rename train_df columns and values
+# ### train_df
 
 # %%
 train_df = pd.read_csv(CFG.TRAIN_CSV)
@@ -91,7 +91,7 @@ train_df[cols[1:]] = train_df[cols[1:]].replace(vals)
 train_df.sample(2)
 
 # %% [markdown]
-# ### Coordinates
+# ### coordinates_df
 
 # %%
 coords_df = pd.read_csv(CFG.COORDS_CSV)
@@ -115,7 +115,10 @@ coords_df.series_id.nunique()
 coords_df['ss_id'] = coords_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
 coords_df['instance_id'] = coords_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}_{str(row["instance"])}', axis=1)
 
-train_desc_df['id'] = train_desc_df.apply(lambda row: str(row['study_id']) + str(row['series_id']), axis=1)
+train_desc_df['ss_id'] = train_desc_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
+
+# %%
+train_desc_df.sample()
 
 # %%
 coords_df.sample(2)
@@ -138,10 +141,13 @@ coords_df.condition.nunique()
 coords_df.head(10)
 
 # %%
-train_desc_df[train_desc_df['id'] == '4003253702807833'].series_description.values[0]
+train_desc_df.series_description.unique()
 
 # %%
-coords_df['plane'] = coords_df.apply(lambda row: train_desc_df[train_desc_df['id'] == row['id']].series_description.values[0], axis=1)
+# train_desc_df[train_desc_df['ss_id'] == '4003253702807833'].series_description.values[0]
+
+# %%
+coords_df['plane'] = coords_df.apply(lambda row: train_desc_df[train_desc_df['ss_id'] == row['ss_id']].series_description.values[0], axis=1)
 
 # %%
 coords_df.sample(5)
@@ -155,10 +161,10 @@ coords_df[(coords_df.condition == 'SCS') & (coords_df.plane != 'Axial T2')].samp
 coords_df.groupby(['study_id','series_id']).instance.unique()
 
 # %%
-coords_df.id.nunique()
+coords_df.ss_id.nunique(), coords_df.instance_id.nunique()
 
 # %% [markdown]
-# ### Files
+# ### files_df
 
 # %%
 files_df.rename(columns={'patient': 'study_id', 'series': 'series_id', 'image': 'instance'}, inplace=True)
@@ -169,10 +175,52 @@ files_df['instance_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{s
 
 # %%
 source_dir = CFG.PNG_DIR
-files_df['filename'] = files_df.apply(lambda row: f'{source_dir}\\{row.study_id}_{row.series_id}_{row.image}.png', axis=1)
+files_df['filename'] = files_df.apply(lambda row: f'{source_dir}\\{row.study_id}_{row.series_id}_{row.instance}.png', axis=1)
 
 # %%
 files_df.sample()
+
+# %%
+train_desc_df.sample()
+
+# %%
+# foo_df = pd.merge(files_df, train_desc_df['series_description'], left_on='ss_id', right_on='ss_id', how='cross')
+# foo_df.sample()
+
+# %%
+
+# %%
+coords_df = pd.merge(coords_df, files_df[['instance_id', 'rows', 'columns', 'filename']], left_on='instance_id', right_on='instance_id')
+
+# %%
+coords_df.sample()
+
+# %%
+# TODO: make sure we match coords corectly
+coords_df['x_perc'] = coords_df['x'] / coords_df['columns']
+coords_df['y_perc'] = coords_df['y'] / coords_df['rows']
+
+# %%
+ax, non_ax = coords_df[coords_df['plane'] == 'Axial T2'], coords_df[coords_df['plane'] != 'Axial T2']
+ax.shape, non_ax.shape, coords_df.shape
+
+# %%
+coords_df.y.min()
+
+# %%
+for c in [ax, non_ax]:
+    print(c['x_perc'].min(), c['y_perc'].min())
+    print(c['x_perc'].max(), c['y_perc'].max())
+    print('/////////////')
+    # print(c['x_perc'].mean(), c['y_perc'].mean())
+
+# %%
+coords_df.shape
+
+# %%
+
+# %%
+files_df.sample(5)
 
 # %% [markdown]
 # ### Save results
