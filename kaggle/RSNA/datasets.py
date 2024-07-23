@@ -48,7 +48,6 @@ class CFG:
 # %%
 train_df = pd.read_csv(CFG.TRAIN_CSV)
 train_desc_df = pd.read_csv(CFG.TRAIN_DESC_CSV)
-files_df = pd.read_csv(CFG.FILES_CSV)
 
 train_df.shape, train_desc_df.shape
 
@@ -167,27 +166,27 @@ coords_df.ss_id.nunique(), coords_df.instance_id.nunique()
 # ### files_df
 
 # %%
-files_df.rename(columns={'patient': 'study_id', 'series': 'series_id', 'image': 'instance'}, inplace=True)
+files_df = pd.read_csv(CFG.FILES_CSV)
+
+# %%
+files_df.sample(5)
+
+# %%
+# files_df.rename(columns={'patient': 'study_id', 'series': 'series_id', 'image': 'instance'}, inplace=True)
 
 # %%
 files_df['ss_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
-files_df['instance_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}_{str(row["instance"])}', axis=1)
+files_df['instance_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}_{str(row["instancenumber"])}', axis=1)
 
 # %%
 source_dir = CFG.PNG_DIR
-files_df['filename'] = files_df.apply(lambda row: f'{source_dir}\\{row.study_id}_{row.series_id}_{row.instance}.png', axis=1)
+files_df['filename'] = files_df.apply(lambda row: f'{source_dir}\\{row.study_id}_{row.series_id}_{row.image}.png', axis=1)
 
 # %%
 files_df.sample()
 
 # %%
 train_desc_df.sample()
-
-# %%
-# foo_df = pd.merge(files_df, train_desc_df['series_description'], left_on='ss_id', right_on='ss_id', how='cross')
-# foo_df.sample()
-
-# %%
 
 # %%
 coords_df = pd.merge(coords_df, files_df[['instance_id', 'rows', 'columns', 'filename']], left_on='instance_id', right_on='instance_id')

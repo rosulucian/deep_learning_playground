@@ -94,29 +94,6 @@ ds.pixel_array.shape, ds.Rows, ds.PhotometricInterpretation, ds.SeriesDescriptio
 len(files)
 
 # %%
-# train_desc_df = pd.read_csv(CFG.TRAIN_DESC_CSV)
-# # train_desc_df['folders'] = train_desc_df['study_id'] + train_desc_df['series_id']
-# train_desc_df['filename'] = train_desc_df.apply(lambda row: f'{CFG.IMAGES_DIR}\\{row.study_id}\\{row.series_id}', axis=1)
-
-# train_desc_df.shape
-
-# %%
-# train_desc_df.iloc[0]
-
-# %%
-# folders = train_desc_df.filename.to_list()
-
-# len(folders)
-
-# %%
-# folder = Path(folders[0])
-# files = [str(item) for item in folder.rglob('*.dcm') ]
-# len(files)
-
-# %%
-# [f.split('\\')[-1][:-4] for f in files]
-
-# %%
 keys = ['InstanceNumber', 'Rows', 'Columns', 'SliceThickness', 'SpacingBetweenSlices', 'PatientPosition', 'SeriesDescription']
 
 def process(f, size=CFG.size, keys=keys):
@@ -161,6 +138,9 @@ files_df.shape
 
 # %%
 files_df.sample(5)
+
+# %%
+files_df.patientposition.unique(), files_df.seriesdescription.unique(), files_df.spacingbetweenslices.unique()
 
 # %%
 files_df.to_csv(CFG.FILES_CSV, index=False)
