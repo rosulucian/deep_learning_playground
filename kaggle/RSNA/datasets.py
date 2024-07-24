@@ -34,7 +34,7 @@ class CFG:
     
     ROOT_FOLDER = train_dir / 'original'
     DEST_FOLDER = train_dir
-    PNG_DIR = ROOT_FOLDER / f'pngs_{image_size}'
+    PNG_DIR = DEST_FOLDER / f'pngs_{image_size}'
     IMAGES_DIR = ROOT_FOLDER / 'train_images'
     TRAIN_CSV = ROOT_FOLDER / 'train.csv'
     FILES_CSV = ROOT_FOLDER / 'train_files.csv'
@@ -215,8 +215,6 @@ for c in [ax, non_ax]:
 
 # %%
 coords_df.shape
-
-# %%
 
 # %%
 files_df.sample(5)
