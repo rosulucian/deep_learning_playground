@@ -161,6 +161,12 @@ files_df.patientposition.value_counts()
 # %%
 files_df.groupby(['study_id']).patientposition.unique().value_counts()
 
+# %%
+# some studies have more series
+grp = files_df.groupby('study_id').filter(lambda group: group.series_id.nunique() > 3).study_id
+multi_studies = grp.unique().tolist()
+grp.nunique(), len(multi_studies)
+
 # %% [markdown]
 # #### Positive labels
 
