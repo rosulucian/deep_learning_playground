@@ -43,13 +43,16 @@ class CFG:
 
 
 # %% [markdown]
-# ### train_df
+# ### Train_df
 
 # %%
 train_df = pd.read_csv(CFG.TRAIN_CSV)
 train_desc_df = pd.read_csv(CFG.TRAIN_DESC_CSV)
 
 train_df.shape, train_desc_df.shape
+
+# %%
+train_desc_df['ss_id'] = train_desc_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
 
 # %%
 train_df.head()
@@ -90,7 +93,7 @@ train_df[cols[1:]] = train_df[cols[1:]].replace(vals)
 train_df.sample(2)
 
 # %% [markdown]
-# ### coordinates_df
+# ### Coordinates_df
 
 # %%
 coords_df = pd.read_csv(CFG.COORDS_CSV)
@@ -113,8 +116,6 @@ coords_df.series_id.nunique()
 # %%
 coords_df['ss_id'] = coords_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
 coords_df['instance_id'] = coords_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}_{str(row["instance"])}', axis=1)
-
-train_desc_df['ss_id'] = train_desc_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
 
 # %%
 train_desc_df.sample()
@@ -143,17 +144,28 @@ coords_df.head(10)
 train_desc_df.series_description.unique()
 
 # %%
-# train_desc_df[train_desc_df['ss_id'] == '4003253702807833'].series_description.values[0]
+train_desc_df.series_description.isna().sum()
 
 # %%
-coords_df['plane'] = coords_df.apply(lambda row: train_desc_df[train_desc_df['ss_id'] == row['ss_id']].series_description.values[0], axis=1)
+coords_df.shape
 
 # %%
-coords_df.sample(5)
+coords_df = pd.merge(coords_df, train_desc_df.loc[:, ['ss_id', 'series_description']],  how='inner', left_on=['ss_id'], right_on=['ss_id'])
+
+coords_df.sample(2)
+
+# %%
+coords_df.shape
+
+# %%
+# coords_df['plane'] = coords_df.apply(lambda row: train_desc_df[train_desc_df['ss_id'] == row['ss_id']].series_description.values[0], axis=1)
+
+# %%
+# coords_df.sample(5)
 
 # %%
 # check canal stenosis is noy only in axial plane
-coords_df[(coords_df.condition == 'SCS') & (coords_df.plane != 'Axial T2')].sample()
+coords_df[(coords_df.condition == 'SCS') & (coords_df.series_description != 'Axial T2')].sample()
 
 # %%
 # get the positive slices
@@ -163,7 +175,7 @@ coords_df.groupby(['study_id','series_id']).instance.unique()
 coords_df.ss_id.nunique(), coords_df.instance_id.nunique()
 
 # %% [markdown]
-# ### files_df
+# ### Files_df
 
 # %%
 files_df = pd.read_csv(CFG.FILES_CSV)
@@ -175,10 +187,7 @@ files_df.sample(5)
 # files_df.rename(columns={'patient': 'study_id', 'series': 'series_id', 'image': 'instance'}, inplace=True)
 
 # %%
-files_df.patientposition.unique()
-
-# %%
-files_df.patientposition.value_counts()
+files_df.patientposition.value_counts(), files_df.patientposition.isna().sum()
 
 # %%
 files_df.groupby(['study_id']).patientposition.unique().value_counts()
@@ -201,6 +210,9 @@ train_desc_df.sample()
 coords_df = pd.merge(coords_df, files_df[['instance_id', 'rows', 'columns', 'filename']], left_on='instance_id', right_on='instance_id')
 
 # %%
+coords_df.shape
+
+# %%
 coords_df.sample()
 
 # %%
@@ -209,7 +221,7 @@ coords_df['x_perc'] = coords_df['x'] / coords_df['columns']
 coords_df['y_perc'] = coords_df['y'] / coords_df['rows']
 
 # %%
-ax, non_ax = coords_df[coords_df['plane'] == 'Axial T2'], coords_df[coords_df['plane'] != 'Axial T2']
+ax, non_ax = coords_df[coords_df['series_description'] == 'Axial T2'], coords_df[coords_df['series_description'] != 'Axial T2']
 ax.shape, non_ax.shape, coords_df.shape
 
 # %%
@@ -223,7 +235,15 @@ for c in [ax, non_ax]:
     # print(c['x_perc'].mean(), c['y_perc'].mean())
 
 # %%
-coords_df.shape
+files_df.shape
+
+# %%
+files_df = pd.merge(files_df, train_desc_df.loc[:, ['ss_id', 'series_description']],  how='inner', left_on=['ss_id'], right_on=['ss_id'])
+
+files_df.sample(2)
+
+# %%
+files_df.shape
 
 # %%
 files_df.sample(5)
