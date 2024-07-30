@@ -175,6 +175,15 @@ files_df.sample(5)
 # files_df.rename(columns={'patient': 'study_id', 'series': 'series_id', 'image': 'instance'}, inplace=True)
 
 # %%
+files_df.patientposition.unique()
+
+# %%
+files_df.patientposition.value_counts()
+
+# %%
+files_df.groupby(['study_id']).patientposition.unique().value_counts()
+
+# %%
 files_df['ss_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}', axis=1)
 files_df['instance_id'] = files_df.apply(lambda row: f'{str(row["study_id"])}_{str(row["series_id"])}_{str(row["instancenumber"])}', axis=1)
 
