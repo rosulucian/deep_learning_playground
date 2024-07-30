@@ -302,7 +302,8 @@ t_df = coords_df[:-100]
 # t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
 v_df = coords_df[-100:]
 
-CFG2 = CFG
+CFG2 = CFG()
+# CFG2 = copy.deepcopy(CFG)
 CFG2.BATCH_SIZE = 16
 CFG2.num_workers = 2
 
@@ -449,23 +450,33 @@ def mixup(data, targets, alpha, device):
 
 
 # %%
+from torchmetrics import MetricCollection
+from torchmetrics.classification import MultilabelAccuracy, MultilabelPrecision, MultilabelRecall, MultilabelF1Score
+
+
+# %%
 class GeMModel(pl.LightningModule):
     def __init__(self, cfg = CFG, pretrained = True):
         super().__init__()
 
         self.cfg = cfg
+
+        self.dev = cfg.device
         
         out_indices = (3, 4)
 
         self.criterion = FocalLossBCE()
 
-        self.train_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
-        self.val_acc = tm.classification.MulticlassAccuracy(num_classes=self.cfg.N_LABELS)
+        metrics = MetricCollection([
+            MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
+            MultilabelPrecision(num_labels=self.cfg.N_LABELS),
+            MultilabelRecall(num_labels=self.cfg.N_LABELS),
+            MultilabelF1Score(num_labels=self.cfg.N_LABELS)
+        ])
 
-        # self.train_acc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
-        self.val_macc = tm.classification.MultilabelAccuracy(num_labels=self.cfg.N_LABELS)
-
-        self.train_auroc = tm.classification.MulticlassAUROC(num_classes=self.cfg.N_LABELS)
+        self.train_metrics = metrics.clone(prefix='train/')
+        self.valid_metrics = metrics.clone(prefix='val/')
+        
         # self.model_name = self.cfg.model_name
         print(self.cfg.model_name)
         
@@ -520,34 +531,33 @@ class GeMModel(pl.LightningModule):
         loss = self.criterion(preds, y)
         
         if mode == 'train':
-            self.train_acc(preds, y.argmax(1))
+            output = self.train_metrics(preds, y)
+            self.log_dict(output)
         else:
-            self.val_acc(preds, y.argmax(1))
-            self.val_macc(preds, y)
-        
+            self.valid_metrics.update(preds, y)
+
         self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
 
         return loss
     
     def training_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='train')
-        self.log(f'train/acc', self.train_acc, on_step=True, on_epoch=True)
         
         return loss
         
     def validation_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='val')
-        self.log(f'val/acc', self.val_acc, on_step=True, on_epoch=True)
-        self.log(f'val/macc', self.val_macc, on_step=True, on_epoch=True)
     
         return loss
     
     def on_train_epoch_end(self):
-        self.train_acc.reset()
+        self.train_metrics.reset()
 
     def on_validation_epoch_end(self):
-        self.val_acc.reset()
-        self.val_macc.reset()
+        output = self.valid_metrics.compute()
+        self.log_dict(output)
+
+        self.valid_metrics.reset()
 
 
 # %%
@@ -562,10 +572,7 @@ x.shape, foo.shape
 # %%
 
 # %% [markdown]
-# ### Split
-
-# %%
-from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
+# ### Select healthy files
 
 # %%
 # add healthy images
@@ -573,11 +580,61 @@ from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
 files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
 
 # %%
-sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
-train_idx, val_idx = next(sss.split(coords_df.filename, coords_df.cl))
+files_df['cl'] = 'H'
 
-t_df = coords_df.iloc[train_idx]
-v_df = coords_df.iloc[val_idx]
+# %%
+train_cols = ['filename', 'cl']
+
+# %%
+files_df.loc[:, train_cols].head()
+
+# %%
+healthy_df = files_df.loc[:, train_cols]
+healthy_df = pd.merge(healthy_df, coords_df.loc[:, ['filename']],  how='left', on=['filename'], indicator=True)
+
+healthy_df.shape
+
+# %%
+healthy_df.head(2)
+
+# %%
+healthy_df['_merge'].value_counts()
+
+# %%
+healthy_df = healthy_df[healthy_df['_merge'] ==  'left_only']
+healthy_df.shape
+
+# %%
+healthy_df.head(2)
+
+# %% [markdown]
+# ### Split
+
+# %%
+from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
+
+# %%
+positive_files = coords_df.filename.nunique()
+positive_files
+
+# %%
+healthy_df.sample(positive_files).shape
+
+# %%
+coords_df.shape
+
+# %%
+train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.sample(positive_files).loc[:, train_cols]], ignore_index=True)
+train_df.shape
+
+# %%
+
+# %%
+sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
+train_idx, val_idx = next(sss.split(train_df.filename, train_df.cl))
+
+t_df = train_df.iloc[train_idx]
+v_df = train_df.iloc[val_idx]
 
 t_df.shape, v_df.shape
 
@@ -617,14 +674,14 @@ loss_ckpt = pl.callbacks.ModelCheckpoint(
     mode='min',
 )
 
-acc_ckpt = pl.callbacks.ModelCheckpoint(
-    monitor='val/acc',
-    auto_insert_metric_name=False,
-    dirpath=CFG.CKPT_DIR / run_name,
-    filename='ep_{epoch:02d}_acc_{val/acc:.5f}',
-    save_top_k=2,
-    mode='max',
-)
+# acc_ckpt = pl.callbacks.ModelCheckpoint(
+#     monitor='val/acc',
+#     auto_insert_metric_name=False,
+#     dirpath=CFG.CKPT_DIR / run_name,
+#     filename='ep_{epoch:02d}_acc_{val/acc:.5f}',
+#     save_top_k=2,
+#     mode='max',
+# )
 
 lr_monitor = LearningRateMonitor(logging_interval='step')
 
@@ -637,7 +694,7 @@ trainer = pl.Trainer(
     gradient_clip_val=0.5, 
     # gradient_clip_algorithm="value",
     logger=wandb_logger,
-    callbacks=[loss_ckpt, acc_ckpt, lr_monitor],
+    callbacks=[loss_ckpt, lr_monitor],
 )
 
 # %%
@@ -657,15 +714,39 @@ x, y = next(iter(dm.train_dataloader()))
 
 # %%
 # foo = model(x)
-foo = model(x.to(CFG.device))
+foo = model(x.to(CFG.device)).detach().cpu()
 foo.shape
 
 # %%
-torch.where(y[0] > 0)
+macc = tm.classification.MultilabelAccuracy(num_labels=26)
+mapp = tm.classification.MultilabelPrecision(num_labels=26)
+marr = tm.classification.MultilabelRecall(num_labels=26)
+maff = tm.classification.MultilabelF1Score(num_labels=26)
 
 # %%
-bar = foo[0].sigmoid().detach().cpu().numpy()
-np.argwhere(bar > 0.5)
+macc(foo, y), mapp(foo, y), marr(foo, y), maff(foo, y)
+
+# %%
+((foo.sigmoid() > 0.5) == y).sum()/16/26
+
+# %%
+((foo.sigmoid() > 0.5) != y).sum()
+
+# %%
+(1037.3 - 1026)/1026 * 100
+
+# %%
+torch.argwhere(y > 0).T
+
+# %%
+bar = foo.sigmoid().numpy()
+np.argwhere(bar > 0.5).T
+
+# %%
+bar[12]
+
+# %% [markdown]
+# # 
 
 # %%
 torch.nn.functional.sigmoid(foo[0])
