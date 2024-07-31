@@ -246,6 +246,9 @@ files_df.sample(2)
 files_df.shape
 
 # %%
+files_df['cl'] = 'H'
+
+# %%
 files_df.sample(5)
 
 # %% [markdown]
