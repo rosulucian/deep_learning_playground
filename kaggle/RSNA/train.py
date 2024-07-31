@@ -16,6 +16,9 @@
 # %load_ext autoreload
 # %autoreload 2
 
+# %% [markdown]
+# ### Imports
+
 # %%
 import os
 import time
@@ -41,6 +44,12 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau # Lear
 
 import albumentations as A
 # from albumentations.pytorch import ToTensorV2
+
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import Callback, LearningRateMonitor
+from torchmetrics.wrappers import ClasswiseWrapper
+from torchmetrics import MetricCollection
+from torchmetrics.classification import MultilabelAccuracy, MultilabelPrecision, MultilabelRecall, MultilabelF1Score
 
 import timm
 
@@ -156,9 +165,6 @@ train_df.shape, train_desc_df.shape, coords_df.shape, files_df.shape
 
 # %%
 train_df.sample(5)
-
-# %%
-coords_df.shape
 
 # %%
 coords_df.sample(2)
@@ -450,11 +456,6 @@ def mixup(data, targets, alpha, device):
 
 
 # %%
-from torchmetrics import MetricCollection
-from torchmetrics.classification import MultilabelAccuracy, MultilabelPrecision, MultilabelRecall, MultilabelF1Score
-
-
-# %%
 class GeMModel(pl.LightningModule):
     def __init__(self, cfg = CFG, pretrained = True):
         super().__init__()
@@ -467,12 +468,15 @@ class GeMModel(pl.LightningModule):
 
         self.criterion = FocalLossBCE()
 
-        metrics = MetricCollection([
-            MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
-            MultilabelPrecision(num_labels=self.cfg.N_LABELS),
-            MultilabelRecall(num_labels=self.cfg.N_LABELS),
-            MultilabelF1Score(num_labels=self.cfg.N_LABELS)
-        ])
+        wrapped_metric = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes)
+        
+        metrics = MetricCollection({
+            'macc': MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
+            'macc_none': wrapped_metric,
+            'mpr': MultilabelPrecision(num_labels=self.cfg.N_LABELS),
+            'mrec': MultilabelRecall(num_labels=self.cfg.N_LABELS),
+            'f1': MultilabelF1Score(num_labels=self.cfg.N_LABELS)
+        })
 
         self.train_metrics = metrics.clone(prefix='train/')
         self.valid_metrics = metrics.clone(prefix='val/')
@@ -580,28 +584,32 @@ x.shape, foo.shape
 files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
 
 # %%
-files_df['cl'] = 'H'
+# files_df['cl'] = 'H'
 
 # %%
-train_cols = ['filename', 'cl']
+train_cols = ['filename', 'cl', 'series_description']
 
 # %%
-files_df.loc[:, train_cols].head()
+files_df.loc[:, train_cols].head(2)
 
 # %%
+# exclude files with labels
 healthy_df = files_df.loc[:, train_cols]
 healthy_df = pd.merge(healthy_df, coords_df.loc[:, ['filename']],  how='left', on=['filename'], indicator=True)
 
 healthy_df.shape
 
 # %%
-healthy_df.head(2)
+files_df.shape
 
 # %%
 healthy_df['_merge'].value_counts()
 
 # %%
-healthy_df = healthy_df[healthy_df['_merge'] ==  'left_only']
+coords_df.filename.nunique() +  122672
+
+# %%
+healthy_df = healthy_df[healthy_df['_merge'] == 'left_only']
 healthy_df.shape
 
 # %%
@@ -628,8 +636,6 @@ train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.sample(positive_f
 train_df.shape
 
 # %%
-
-# %%
 sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
 train_idx, val_idx = next(sss.split(train_df.filename, train_df.cl))
 
@@ -640,10 +646,6 @@ t_df.shape, v_df.shape
 
 # %% [markdown]
 # ### Train
-
-# %%
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import Callback, LearningRateMonitor
 
 # %%
 CFG.BATCH_SIZE, CFG.device
@@ -702,6 +704,11 @@ model = GeMModel(CFG)
 
 # %%
 trainer.fit(model, dm)
+
+# %%
+# np.array([0.0625, 0.9375, 0.8125, 0.0000, 1.0000, 1.0000, 0.0938, 0.8125, 0.7500,
+#         0.8750, 0.2500, 0.0625, 0.9688, 0.9062, 0.9688, 0.1875, 1.0000, 0.6562,
+#         0.7500, 0.7812, 0.6875, 0.8438, 0.8750, 0.9688, 0.4062, 0.2188]).mean()
 
 # %%
 wandb.finish()
