@@ -85,11 +85,11 @@ def seed_torch(seed):
 # TODO: maybe use condition and level for classes
 classes = ['SCS', 'RNFN', 'LNFN', 'LSS', 'RSS'] + ['H'] # add healthy class
 
-classes = ['SCSL1L2', 'SCSL2L3', 'SCSL3L4', 'SCSL4L5', 'SCSL5S1', 'RNFNL4L5',
-       'RNFNL5S1', 'RNFNL3L4', 'RNFNL1L2', 'RNFNL2L3', 'LNFNL1L2',
-       'LNFNL4L5', 'LNFNL5S1', 'LNFNL2L3', 'LNFNL3L4', 'LSSL1L2',
-       'RSSL1L2', 'LSSL2L3', 'RSSL2L3', 'LSSL3L4', 'RSSL3L4', 'LSSL4L5',
-       'RSSL4L5', 'LSSL5S1', 'RSSL5S1'] + ['H']
+# classes = ['SCSL1L2', 'SCSL2L3', 'SCSL3L4', 'SCSL4L5', 'SCSL5S1', 'RNFNL4L5',
+#        'RNFNL5S1', 'RNFNL3L4', 'RNFNL1L2', 'RNFNL2L3', 'LNFNL1L2',
+#        'LNFNL4L5', 'LNFNL5S1', 'LNFNL2L3', 'LNFNL3L4', 'LSSL1L2',
+#        'RSSL1L2', 'LSSL2L3', 'RSSL2L3', 'LSSL3L4', 'RSSL3L4', 'LSSL4L5',
+#        'RSSL4L5', 'LSSL5S1', 'RSSL5S1'] + ['H']
 
 num_classes = len(classes)
 class2id = {b: i for i, b in enumerate(classes)}
@@ -100,7 +100,7 @@ train_dir = Path('E:\data\RSNA2024')
 class CFG:
 
     project = 'rsna-local'
-    comment = 'first'
+    comment = 'conditions-only'
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
@@ -468,7 +468,7 @@ class GeMModel(pl.LightningModule):
 
         self.criterion = FocalLossBCE()
 
-        wrapped_metric = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes)
+        wrapped_metric = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multiacc/')
         
         metrics = MetricCollection({
             'macc': MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
@@ -587,7 +587,7 @@ files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
 # files_df['cl'] = 'H'
 
 # %%
-train_cols = ['filename', 'cl', 'series_description']
+train_cols = ['filename', 'cl', 'condition', 'series_description']
 
 # %%
 files_df.loc[:, train_cols].head(2)
@@ -701,6 +701,9 @@ trainer = pl.Trainer(
 
 # %%
 model = GeMModel(CFG)
+
+# %% [markdown]
+# #### Fit
 
 # %%
 trainer.fit(model, dm)
