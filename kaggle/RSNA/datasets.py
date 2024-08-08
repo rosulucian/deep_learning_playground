@@ -247,6 +247,7 @@ files_df.shape
 
 # %%
 files_df['cl'] = 'H'
+files_df['condition'] = 'H'
 
 # %%
 files_df.sample(5)
