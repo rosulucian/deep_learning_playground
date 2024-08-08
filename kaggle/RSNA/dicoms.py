@@ -63,12 +63,20 @@ files[1000]
 # ### Get metadata
 
 # %%
-ds = dicom.dcmread(files[63])
+idx = 63
+ds = dicom.dcmread(files[idx])
 
 # %%
 ds.pixel_array.shape
 
 # %%
+print(ds)
+
+# %%
+np.cross(np.array([0.03407286005191, 0.9994056428998, 0.00523461057921]), np.array([-0.0225372470955, 0.00600466399557, -0.999727971252]))
+
+# %%
+ds = dicom.dcmread(files[idx+2])
 print(ds)
 
 # %%
@@ -94,41 +102,85 @@ ds.pixel_array.shape, ds.Rows, ds.PhotometricInterpretation, ds.SeriesDescriptio
 len(files)
 
 # %%
+# keys = ['InstanceNumber', 'Rows', 'Columns', 'SliceThickness', 'SpacingBetweenSlices', 'PatientPosition', 'SeriesDescription']
+
+# def process(f, size=CFG.size, keys=keys):
+#     series = f.split('\\')[-2]
+#     study = f.split('\\')[-3]
+#     image = f.split('\\')[-1][:-4]
+    
+#     ds = dicom.dcmread(f)
+    
+#     values = []
+
+#     for k in keys:
+#         values.append(ds.get(k))
+
+#     values = [study, series, image] + values
+    
+#     return tuple(values)
+
+# %%
 keys = ['InstanceNumber', 'Rows', 'Columns', 'SliceThickness', 'SpacingBetweenSlices', 'PatientPosition', 'SeriesDescription']
 
-def process(f, size=CFG.size, keys=keys):
-    series = f.split('\\')[-2]
-    study = f.split('\\')[-3]
-    image = f.split('\\')[-1][:-4]
-    
-    ds = dicom.dcmread(f)
-    
-    values = []
+def process_study(study, size=CFG.size, keys=keys):
+    results = []
 
-    for k in keys:
-        values.append(ds.get(k))
+    source_dir = CFG.IMAGES_DIR / str(study)
+    series = os.listdir(source_dir)
 
-    values = [study, series, image] + values
+    for s in series:
+        series_dir = source_dir / s
+        imgs = os.listdir(series_dir)
+
+        for image in imgs:
+            values = []
+
+            slc = dicom.dcmread(series_dir / image)
+            
+            IOP = np.array(slc.ImageOrientationPatient)
+            IPP = np.array(slc.ImagePositionPatient)
     
-    return tuple(values)
+            normal = np.cross(IOP[0:3], IOP[3:])
+            proj = np.dot(IPP, normal)
+
+            # projections += [int(proj)]
+
+            for k in keys:
+                values.append(slc.get(k))
+
+            results += [tuple([study, s, image.split('.')[0], int(proj)] + values)]
+    
+    return results
 
 
 # %%
+foo = process_study(100206310)
+
+len(foo)
+
+# %%
+ids = os.listdir(CFG.IMAGES_DIR)
+
 data = Parallel(n_jobs=16)(
-    delayed(process)(f)
-    # for f in tqdm(files[:24])
-    for f in tqdm(files)
+    delayed(process_study)(f)
+    # for f in tqdm(ids[:24])
+    for f in tqdm(ids)
 )
+
+# %%
+# data[:5]
+
+# %%
+data = sum(data, [])
+len(data)
 
 # %%
 len(files)
 
 # %%
-data[:2]
-
-# %%
 columns = [k.lower() for k in keys]
-columns = ['study_id', 'series_id', 'image'] + columns
+columns = ['study_id', 'series_id', 'image', 'proj'] + columns
 
 columns
 
@@ -162,7 +214,7 @@ for f in tqdm(files[65:68]):
     ds = dicom.dcmread(f)
     img = ds.pixel_array
 
-    img = (img - img.min()) / (img.max() - img.min())
+    # img = (img - img.min()) / (img.max() - img.min())
 
     if ds.PhotometricInterpretation == "MONOCHROME1":
         img = 1 - img
