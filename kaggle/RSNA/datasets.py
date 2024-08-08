@@ -207,7 +207,7 @@ files_df.sample()
 train_desc_df.sample()
 
 # %%
-coords_df = pd.merge(coords_df, files_df[['instance_id', 'rows', 'columns', 'filename']], left_on='instance_id', right_on='instance_id')
+coords_df = pd.merge(coords_df, files_df[['instance_id', 'rows', 'columns', 'filename','patientposition']], left_on='instance_id', right_on='instance_id')
 
 # %%
 coords_df.shape
