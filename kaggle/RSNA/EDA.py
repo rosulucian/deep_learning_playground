@@ -16,7 +16,13 @@
 # %load_ext autoreload
 # %autoreload 2
 
+# %% [markdown]
+# ### Imports
+
 # %%
+import os
+import shutil
+
 import numpy as np 
 import pandas as pd
 
@@ -90,8 +96,11 @@ train_desc_df[train_desc_df['id'] == '4003253702807833'].series_description.valu
 # %%
 # pd.crosstab(coords_df.plane, coords_df.cl)
 
+# %% [markdown]
+# #### Conditions/plane crosstab
+
 # %%
-pd.crosstab(coords_df.condition, coords_df.plane)
+pd.crosstab(coords_df.condition, coords_df.series_description)
 
 # %%
 # get the positive slices
@@ -102,27 +111,15 @@ coords_df.groupby(['study_id','series_id']).instance.unique()
 coords_df.instance_id.nunique()
 
 # %%
-# mean pos images per patient
-coords_df.instance_id.nunique()/coords_df.study_id.nunique(), coords_df.groupby(['study_id']).instance_id.nunique().mean()
+# positive images per patient
+grp = coords_df.groupby(['study_id']).instance_id.count()
 
-# %%
-# total labels
-pos_slices = coords_df.groupby(['study_id','series_id']).instance.unique().apply(list).reset_index(name='slice').explode('slice')
-pos_slices.shape
-
-# %%
-# coords_df[coords_df.instance_number > 100]
-
-# %%
-pos_slices
-
-# %%
-pos_slices.groupby('study_id').slice.nunique().mean()/3
+grp.mean(), grp.min(), grp.max()
 
 # %%
 
 # %% [markdown]
-# ### train_df
+# ### Train_df
 
 # %%
 # look at categories
@@ -131,7 +128,7 @@ for f in ['condition','level']:
     print('-'*50);print();
 
 # %%
-pd.crosstab(coords_df.condition, coords_df.level)
+# pd.crosstab(coords_df.condition, coords_df.level)
 
 # %% [markdown]
 # ### Files
@@ -161,18 +158,55 @@ files_df.patientposition.value_counts()
 # %%
 files_df.groupby(['study_id']).patientposition.unique().value_counts()
 
+# %% [markdown]
+# #### Studies with multiple series
+
 # %%
 # some studies have more series
 grp = files_df.groupby('study_id').filter(lambda group: group.series_id.nunique() > 3).study_id
 multi_studies = grp.unique().tolist()
 grp.nunique(), len(multi_studies), files_df.study_id.nunique()
 
+# %%
+files_df.series_description.value_counts()
+
+# %%
+study_id = multi_studies[1]
+print(study_id)
+files_df[files_df['study_id'] == study_id]
+
+# %% [markdown]
+# #### positive/total images
+
+# %%
+# study_id = multi_studies[1]
+# study 1018005303 has multiple axial series
+study_id = 1018005303
+print(study_id)
+files_df[files_df['study_id'] == study_id].groupby('series_id').series_description.value_counts()
+
+# %%
+coords_df[coords_df['study_id'] == study_id].groupby('series_id').instance.count()
+
+# %%
+coords_df[coords_df['study_id'] == study_id].groupby('series_id').cl.unique()
+
+# %%
+coords_df[coords_df['study_id'] == study_id].groupby('series_id').condition.unique()
+
 # %% [markdown]
 # #### Positive labels
 
 # %%
+coords_df[(coords_df['study_id'] == study_id) & (coords_df['series_description'] == 'Axial T2')]
+
+# %%
+# files_df[(files_df['study_id'] == study_id) & (files_df['series_description'] == 'Axial T2')].sort_values(['series_id', 'image'])[50:]
+
+# %%
 # max/mean images per patient
-files_df.groupby(['study_id','series_id']).image.count().max(), files_df.groupby(['study_id','series_id']).image.count().mean()
+grp = files_df.groupby(['study_id','series_id']).image.count()
+grp.min(), grp.max(), grp.mean()
 
 # %%
 # mean positive imgs per series
@@ -208,6 +242,60 @@ coords_df[coords_df['study_id'] == patient][['instance', 'cl', 'condition']]
 # %%
 
 # %% [markdown]
+# ### Order
+
+# %%
+files_df.sample(2)
+
+# %%
+study = 1018005303
+
+df = files_df[files_df['study_id'] == study]
+
+df.shape
+
+# %%
+df[df['series_description'] == 'Axial T2'].sort_values(['series_id', 'proj'], ascending=[True, False])[:60]
+
+# %%
+df[df['series_description'] == 'Axial T2'].sort_values(['proj'], ascending=[False])[:60]
+
+# %%
+selection = df[df['series_description'] == 'Axial T2'].sort_values(['proj'], ascending=[False])
+
+selection.study_id.unique()[0]
+
+# %%
+selection.shape
+
+# %%
+selection = df[df['series_description'] == 'Axial T2'].sort_values(['proj'], ascending=[False]).reset_index(drop=True)
+# dcoms = selection.filename.to_list()
+
+
+dest_dir = Path('E:\\data\\RSNA2024\\train_images') / str(selection.study_id.unique()[0])
+
+# dest = ('\\').join(dcoms[0].split('\\')[:-1] + ['joined'])
+
+dest_dir
+
+if not os.path.exists(dest_dir):
+    os.makedirs(dest_dir)
+
+
+for i, row in selection.iterrows():
+    src = dest_dir / f'{row["series_id"]}'/ f'{row["image"]}.dcm'
+    dest = dest_dir / 'joined' / f'{i}.dcm'
+    
+    shutil.copy(src, dest)
+
+# %%
+
+# %%
+
+# %%
+
+# %% [markdown]
 # ### Visualisations
 
 # %%
@@ -233,7 +321,7 @@ coords_df[(coords_df['study_id'] == 1883368654) & (coords_df['plane'] == 'Sagitt
 
 
 # %% [markdown]
-# #### image orientations
+# #### Image orientations
 
 # %%
 def get_dcoms(study_id, source=CFG.IMAGES_DIR):
@@ -242,7 +330,7 @@ def get_dcoms(study_id, source=CFG.IMAGES_DIR):
     # for t in ['T1', 'T2']:
     for t in ['Sagittal T1', 'Axial T2']:
         # samp = files_df[(files_df['study_id'] == study_id) & (files_df['seriesdescription'] == t)].sample(1)
-        samp = coords_df[(coords_df['study_id'] == study_id) & (coords_df['plane'] == t)].sample(1) 
+        samp = coords_df[(coords_df['study_id'] == study_id) & (coords_df['series_description'] == t)].sample(1) 
         series_id = samp.series_id.values[0]
         
         samp = files_df[(files_df['study_id'] == study_id) & (files_df['series_id'] == series_id)].sample(1)
@@ -330,6 +418,23 @@ def plot_series(study_id, source=CFG.IMAGES_DIR):
 
     plot_dcom(files, title=f'{series_id} {len(files)} images')
 
+def plot_df(df, source=CFG.IMAGES_DIR):
+    series_id = files_df[files_df['study_id'] == study_id].sample(1).series_id.values[0]
+
+    imgs = df.image.to_list()
+    # imgs.sort()
+
+    files = [source / str(study_id) / str(series_id) / f'{image}.dcm' for image in imgs]
+
+    plot_dcom(files, title=f'{series_id} {len(files)} images')
+    
+
+
+# %%
+study = 1018005303
+df[df['series_description'] == 'Axial T2'].sort_values(['proj'], ascending=[False])[:60]
+
+plot_df(df)
 
 # %%
 study_id = 29931867
