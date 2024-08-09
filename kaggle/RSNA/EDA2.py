@@ -73,15 +73,20 @@ coords_df.groupby('series_description').agg({'y_perc': ['min', 'max']})
 coords_df.iloc[coords_df['y_perc'].argmin()]
 
 # %% [markdown]
-# ### Plot condition
+# ### Plot conditions
 
 # %%
 row = coords_df.iloc[coords_df['y_perc'].argmin()]
 
 row['level']
 
+# %%
+coords_df.groupby(['study_id', 'condition']).instance_id.count().mean()
+
 
 # %%
+
+# %% jupyter={"source_hidden": true}
 def plot(row, source=CFG.IMAGES_DIR):
     # filename = row['filename']
 
@@ -112,6 +117,63 @@ def plot(row, source=CFG.IMAGES_DIR):
     
     plt.show()
 
+
+# %%
+coords_df.sample(2)
+
+
+# %%
+def plot_conditions(study_id, source=CFG.IMAGES_DIR):
+    df = coords_df[coords_df['study_id'] == study_id]
+
+    ss_ids = df.instance_id.unique()
+    imgs = dict(zip(ss_ids, [{'points':[], 'labels':[]} for i in ss_ids]))
+
+    for i in df.instance_id.unique():
+        sel = df[df['instance_id'] == i]
+
+        row = sel.iloc[0]
+        imgs[i]['filename'] = source / str(row['study_id']) / str(row['series_id']) / f'{row["instance"]}.dcm'
+        imgs[i]['title'] = ('-').join(sel.condition.unique())
+
+        for index, row in sel.iterrows():
+            imgs[i]['points'].append((row.x, row.y, row.condition))
+            # imgs[i]['labels'].append(row.condition)
+
+    rows = len(imgs.keys()) // 4 + 1
+    fig, axs = plt.subplots(rows, 4, figsize=(15, rows*4))
+
+    fig.suptitle(study_id)
+
+    axs = axs.flat
+
+    for i, (key, value) in enumerate(imgs.items()):
+        ax = axs[i]
+
+        ax.margins(0, 0)
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+
+        ax.title.set_text(value['title'])
+        
+        ds = dicom.dcmread(value['filename'])
+        img = ds.pixel_array
+
+        # img = (img - img.min()) / (img.max() - img.min())
+
+        if ds.PhotometricInterpretation == "MONOCHROME1":
+            img = 1 - img
+
+        ax.imshow(img, cmap="gray")
+
+        for p in value['points']:
+            ax.scatter(p[0], p[1], label=p[2], marker="x", color="red", s=200)
+    
+    plt.show()
+
+
+# %%
+plot_conditions(4112621380)
 
 # %% [markdown]
 # #### Plot min x,y labels
