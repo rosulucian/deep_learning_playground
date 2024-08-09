@@ -61,13 +61,28 @@ coords_df.shape, files_df.shape, train_df.shape, train_desc_df.shape
 coords_df.sample(2)
 
 # %% [markdown]
+# ### Filter bad labels
+
+# %%
+bad_labels = [3819260179, 2444340715] + coords_df[coords_df['x'] < 10].study_id.tolist()
+
+print(bad_labels), len(bad_labels)
+
+# %%
+clean_coords_df = coords_df[~coords_df['study_id'].isin(bad_labels)]
+
+coords_df.shape, clean_coords_df.shape
+
+# %%
+
+# %% [markdown]
 # ### Condition positions on frame
 
 # %%
-coords_df.groupby('series_description').agg({'x_perc': ['min', 'max']})
+clean_coords_df.groupby('series_description').agg({'x_perc': ['min', 'max'],'y_perc': ['min', 'max']})
 
 # %%
-coords_df.groupby('series_description').agg({'y_perc': ['min', 'max']})
+# clean_coords_df.groupby('series_description').agg({'y_perc': ['min', 'max']})
 
 # %%
 coords_df.iloc[coords_df['y_perc'].argmin()]
@@ -124,7 +139,7 @@ coords_df.sample(2)
 
 # %%
 def plot_conditions(study_id, source=CFG.IMAGES_DIR):
-    df = coords_df[coords_df['study_id'] == study_id]
+    df = coords_df[coords_df['study_id'] == study_id].sort_values(by='series_description', ascending=False)
 
     ss_ids = df.instance_id.unique()
     imgs = dict(zip(ss_ids, [{'points':[], 'labels':[]} for i in ss_ids]))
@@ -134,14 +149,13 @@ def plot_conditions(study_id, source=CFG.IMAGES_DIR):
 
         row = sel.iloc[0]
         imgs[i]['filename'] = source / str(row['study_id']) / str(row['series_id']) / f'{row["instance"]}.dcm'
-        imgs[i]['title'] = ('-').join(sel.condition.unique())
+        imgs[i]['title'] = ('-').join([row.series_description] + sel.condition.unique().tolist())
 
         for index, row in sel.iterrows():
             imgs[i]['points'].append((row.x, row.y, row.condition))
-            # imgs[i]['labels'].append(row.condition)
 
     rows = len(imgs.keys()) // 4 + 1
-    fig, axs = plt.subplots(rows, 4, figsize=(15, rows*4))
+    fig, axs = plt.subplots(rows, 4, figsize=(15, rows*3))
 
     fig.suptitle(study_id)
 
@@ -173,7 +187,7 @@ def plot_conditions(study_id, source=CFG.IMAGES_DIR):
 
 
 # %%
-plot_conditions(4112621380)
+plot_conditions(1820866003)
 
 # %% [markdown]
 # #### Plot min x,y labels
@@ -182,12 +196,17 @@ plot_conditions(4112621380)
 # bad labels
 # bad_labels = [1820866003, 665627263, 2151509334, 1901348744, 286903519, 1880970480, 2151467507, 2905025904]
 
+bad_labels = coords_df[coords_df['x_perc'] < 0.15].study_id.tolist()
+
 bad_labels = coords_df[coords_df['x'] < 10].study_id.tolist()
 
 selection = coords_df[~coords_df['study_id'].isin(bad_labels)]
-row = selection.iloc[selection['y_perc'].argmin()]
+row = selection.iloc[selection['y_perc'].argmax()]
 
-plot(row)
+print(row.study_id)
+
+# plot(row)
+plot_conditions(row.study_id)
 
 # %%
 coords_df[coords_df['x'] < 10].shape, coords_df[coords_df['y'] < 10].shape
@@ -199,27 +218,31 @@ coords_df[coords_df['x'] < 10].shape, coords_df[coords_df['y'] < 10].shape
 # bad labels
 # bad_labels = [1820866003, 665627263, 2151509334, 1901348744, 286903519, 1880970480, 2151467507, 2905025904]
 
-bad_labels = [3819260179]
+# bad_labels = [3819260179]
 
 # bad_labels = coords_df[coords_df['x'] < 10].study_id.tolist()
 
 selection = coords_df[~coords_df['study_id'].isin(bad_labels)]
 row = selection.iloc[selection['y_perc'].argmax()]
 
-plot(row)
+print(row.study_id)
+
+# plot(row)
+plot_conditions(row.study_id)
 
 # %%
 # bad labels
 # bad_labels = [1820866003, 665627263, 2151509334, 1901348744, 286903519, 1880970480, 2151467507, 2905025904]
 
-bad_labels = [3819260179]
+bad_labels = [3819260179, 2444340715]
 
 # bad_labels = coords_df[coords_df['x'] < 10].study_id.tolist()
 
 selection = coords_df[~coords_df['study_id'].isin(bad_labels)]
 row = selection.iloc[selection['y_perc'].argmax()]
 
-plot(row)
+# plot(row)
+plot_conditions(row.study_id)
 
 # %%
 
