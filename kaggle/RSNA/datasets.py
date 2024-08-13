@@ -158,6 +158,9 @@ coords_df.sample(2)
 coords_df.shape
 
 # %%
+files_df.sample()
+
+# %%
 # coords_df['plane'] = coords_df.apply(lambda row: train_desc_df[train_desc_df['ss_id'] == row['ss_id']].series_description.values[0], axis=1)
 
 # %%
@@ -251,6 +254,24 @@ files_df['condition'] = 'H'
 
 # %%
 files_df.sample(5)
+
+# %%
+files_df['inst_min'] = files_df.groupby('ss_id')['instancenumber'].transform('min')
+files_df['inst_max'] = files_df.groupby('ss_id')['instancenumber'].transform('max')
+
+files_df['inst'] = files_df['instancenumber'] - files_df['inst_min']
+files_df['inst_perc'] = files_df['inst'] / files_df['inst_max']
+
+files_df.head(2)
+
+# %%
+coords_df = pd.merge(coords_df, files_df[['instance_id','inst_perc']], left_on='instance_id', right_on='instance_id')
+
+coords_df.sample(2)
+
+# %%
+
+# %%
 
 # %% [markdown]
 # ### Save results

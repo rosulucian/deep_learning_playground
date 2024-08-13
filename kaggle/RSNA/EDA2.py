@@ -73,16 +73,25 @@ clean_coords_df = coords_df[~coords_df['study_id'].isin(bad_labels)]
 
 coords_df.shape, clean_coords_df.shape
 
+# %% [markdown]
+# ### Images per plane
+
+# %%
+coords_df.groupby(['series_description','study_id']).instance.nunique().groupby(['series_description']).agg(['min', 'max', 'mean'])
+
+# %%
+coords_df.groupby(['series_description','study_id']).instance.nunique().groupby(['series_description']).max()
+
 # %%
 
 # %% [markdown]
-# ### Condition positions on frame
+# ### Condition positions limits
 
 # %%
 clean_coords_df.groupby('series_description').agg({'x_perc': ['min', 'max'],'y_perc': ['min', 'max']})
 
 # %%
-# clean_coords_df.groupby('series_description').agg({'y_perc': ['min', 'max']})
+clean_coords_df.groupby('series_description').agg({'inst_perc': ['min', 'max', 'mean']})
 
 # %%
 coords_df.iloc[coords_df['y_perc'].argmin()]
@@ -101,7 +110,7 @@ coords_df.groupby(['study_id', 'condition']).instance_id.count().mean()
 
 # %%
 
-# %% jupyter={"source_hidden": true}
+# %%
 def plot(row, source=CFG.IMAGES_DIR):
     # filename = row['filename']
 
@@ -244,6 +253,23 @@ row = selection.iloc[selection['y_perc'].argmax()]
 # plot(row)
 plot_conditions(row.study_id)
 
+# %% [markdown]
+# ### Left/Right orientation plot
+
+# %%
+hfs = files_df[files_df['patientposition'] == 'HFS'].sample(1).study_id.values[0]
+ffs = files_df[files_df['patientposition'] == 'FFS'].sample(1).study_id.values[0]
+
+hfs, ffs
+
+# %%
+plot_conditions(hfs)
+
+# %%
+plot_conditions(ffs)
+
+# %%
+
 # %%
 
 # %%
@@ -252,23 +278,55 @@ plot_conditions(row.study_id)
 # ### Right/left orientation
 
 # %%
-selection = coords_df[coords_df['condition'] == 'RSS']
+# https://www.kaggle.com/competitions/rsna-2024-lumbar-spine-degenerative-classification/discussion/523859
+
+# %% [markdown]
+# #### RSS/LSS
+
+# %%
+cond = 'RSS'
+selection = coords_df[coords_df['condition'] == cond]
 
 selection.x_perc.hist(bins=200)
 
 # %%
+# cond = 'RSS'
+# selection = coords_df[(coords_df['condition'].isin(['LSS', 'RSS']))]
+
+# selection.x_perc.hist(bins=200)
+
+# %%
+cond = 'LSS'
+selection = coords_df[coords_df['condition'] == cond]
+
+selection.x_perc.hist(bins=200)
+
+# %%
+cond = 'LSS'
+selection = coords_df[(coords_df['condition'] == cond) & (coords_df['patientposition'] == 'FFS')]
+
+selection.x_perc.hist(bins=200)
+
+# %%
+cond = 'LSS'
+selection = coords_df[(coords_df['condition'] == cond) & (coords_df['patientposition'] == 'HFS')]
+
+selection.x_perc.hist(bins=200)
+
+# %%
+cond = 'LSS'
+selection = coords_df[coords_df['condition'] == cond]
+
 selection.patientposition.value_counts()
+
+# %%
+files_df.groupby(['study_id']).patientposition.unique().value_counts()
 
 # %%
 selection[selection['x_perc'] > 0.50].patientposition.value_counts()
 
 # %%
 selection[selection['x_perc'] < 0.45].patientposition.value_counts()
-
-# %%
-selection = coords_df[coords_df['condition'] == 'LSS']
-
-selection.x_perc.hist(bins=200)
 
 # %%
 selection[selection['x_perc'] < 0.45].patientposition.value_counts()
@@ -279,12 +337,83 @@ selection[selection['x_perc'] < 0.45].study_id.unique()
 # %%
 
 # %% [markdown]
-# ### Frame positions in series
+# ### Frame position distribution in series
+
+# %% [markdown]
+# #### RNFN/LNFN
+
+# %%
+cond = 'RNFN'
+selection = coords_df[coords_df['condition'] == cond]
+
+selection.inst_perc.hist(bins=100)
+plt.suptitle(cond)
+plt.show()
+
+# %%
+cond = 'RNFN'
+selection = coords_df[(coords_df['condition'] == cond) & (coords_df['patientposition'] == 'FFS')]
+
+selection.inst_perc.hist(bins=200)
+plt.suptitle(cond)
+plt.show()
+
+# %%
+cond = 'RNFN'
+selection = coords_df[(coords_df['condition'] == cond) & (coords_df['patientposition'] == 'HFS')]
+
+selection.inst_perc.hist(bins=200)
+plt.suptitle(cond)
+plt.show()
+
+# %%
+cond = 'LNFN'
+selection = coords_df[coords_df['condition'] == cond]
+
+selection.inst_perc.hist(bins=100)
+plt.suptitle(cond)
+plt.show()
+
+# %%
+selection = coords_df[coords_df['patientposition'] == 'HFS']
+selection.inst_perc = 1 - selection.inst_perc
+
+# %%
+cond = 'LNFN'
+selection = coords_df[coords_df['condition'] == cond]
+
+# selection[selection['patientposition'] == 'HFS']['inst_perc'] = 1 - selection['inst_perc']
+
+selection[selection['patientposition'] == 'HFS'].inst_perc.hist(bins=100)
+plt.suptitle(cond)
+plt.show()
+
+# %% [markdown]
+# #### SCS
+
+# %%
+cond = 'SCS'
+selection = coords_df[coords_df['condition'] == cond]
+
+selection.inst_perc.hist(bins=50)
+plt.suptitle(cond)
+plt.show()
+
+# %%
+selection.inst_perc.mean()
+
+# %% [markdown]
+# ### Sagital ordering
+
+# %%
+hfs = files_df[files_df['patientposition'] == 'HFS'].sample(1).study_id.values[0]
+ffs = files_df[files_df['patientposition'] == 'FFS'].sample(1).study_id.values[0]
+
+hfs, ffs
 
 # %%
 
 # %%
-coords_df.sample(2)
 
 # %%
 
