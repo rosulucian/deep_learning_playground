@@ -99,12 +99,20 @@ num_classes = len(classes)
 class2id = {b: i for i, b in enumerate(classes)}
 
 # %%
+labels = CFG.classes
+pred_labels = [f'pred_{l}' for l in labels]
+
+labels, pred_labels
+
+# %%
 train_dir = Path('E:\data\RSNA2024')
 
 class CFG:
 
     project = 'rsna-2'
     comment = 'all-labels'
+
+    ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps all-labels\ep_03_loss_0.15231.ckpt")
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
@@ -228,22 +236,19 @@ coords_df[coords_df['instance_id'] == inst_id].cl.to_list()
 # ### Dataset
 
 # %%
-from dataset import rsna_dataset
+from dataset import rsna_inf_dataset
 
 # %%
 selection = coords_df[coords_df['condition'].isin(CFG.classes)]
 
 # %%
-dset = rsna_dataset(selection, CFG)
+dset = rsna_inf_dataset(selection, CFG)
 
 print(dset.__len__())
 
-img, label, = dset.__getitem__(2)
-print(img.shape, label.shape)
-print(img.dtype, label.dtype)
-
-# %%
-label
+img, ids, label, = dset.__getitem__(2)
+print(img.shape)
+print(img.dtype, label)
 
 # %%
 img.mean(), img.std(), img.min(), img.max()
@@ -257,75 +262,53 @@ plt.imshow(img[0], cmap='gray')
 # ### Datamodule
 
 # %%
-from dataset import rsna_dataset
+from dataset import rsna_inf_dataset
 
 
 # %%
-class rsna_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, cfg=CFG, train_tfs=None, val_tfs=None):
+class inference_datamodule(pl.LightningDataModule):
+    def __init__(self, df, cfg=CFG, tfs=None):
         super().__init__()
         
-        self.train_df = train_df
-        self.val_df = val_df
-        # self.coord_df = coord_df
-        
-        self.train_bs = cfg.BATCH_SIZE
-        self.val_bs = cfg.BATCH_SIZE
-
-        self.train_tfs = train_tfs
-        self.val_tfs = val_tfs
-
+        self.df = df
+        self.bs = cfg.BATCH_SIZE
+        self.tfs = tfs
         self.cfg = cfg
         
         self.num_workers = cfg.num_workers
         
-    def train_dataloader(self):
-        train_ds = rsna_dataset(self.train_df, self.cfg, tfs=self.train_tfs, mode='train')
+    def predict_dataloader(self):
+        ds = rsna_inf_dataset(self.df, self.cfg, tfs=self.tfs, mode='train')
         
         train_loader = torch.utils.data.DataLoader(
-            train_ds,
-            batch_size=self.train_bs,
+            ds,
+            batch_size=self.bs,
             pin_memory=False,
             drop_last=False,
-            shuffle=True,
+            # shuffle=True,
             persistent_workers=True,
             num_workers=self.num_workers,
         )
         
         return train_loader
-        
-    def val_dataloader(self):
-        val_ds = rsna_dataset(self.val_df, self.cfg, tfs=self.val_tfs, mode='val')
-        
-        val_loader = torch.utils.data.DataLoader(
-            val_ds,
-            batch_size=self.val_bs,
-            pin_memory=False,
-            drop_last=False,
-            shuffle=False,
-            persistent_workers=True,
-            num_workers=2,
-        )
-        
-        return val_loader
+
 
 # %%
-
-
 t_df = selection[:-100]
-# t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
-v_df = selection[-100:]
+
 
 CFG2 = CFG()
 # CFG2 = copy.deepcopy(CFG)
 CFG2.BATCH_SIZE = 16
 CFG2.num_workers = 2
 
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2)
-# dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = inference_datamodule(t_df, cfg=CFG2)
 
-x, y = next(iter(dm.train_dataloader()))
-x.shape, y.shape, x.dtype, y.dtype
+x, ids, y = next(iter(dm.predict_dataloader()))
+x.shape, len(y), x.dtype,
+
+# %%
+y[0]
 
 # %%
 plt.imshow(x[10][0], cmap='gray')
@@ -352,14 +335,14 @@ val_tfs = A.Compose([
 ])
 
 # %%
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = inference_datamodule(t_df, cfg=CFG2, tfs=val_tfs)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
-x, y = next(iter(dm.train_dataloader()))
-x.shape, y.shape, x.dtype, y.dtype
+x, ids, y = next(iter(dm.predict_dataloader()))
+x.shape, x.dtype,
 
 # %%
-y[0]
+y[0], ids[0]
 
 # %%
 plt.imshow(x[2][0], cmap='gray')
@@ -534,6 +517,23 @@ class GeMModel(pl.LightningModule):
             # return [optimizer], [LRscheduler]
             return optimizer
 
+    def predict_step(self, batch):
+        imgs, ids, targets = batch
+
+        preds = self(imgs)
+
+        t_df = pd.DataFrame(targets.detach().cpu().numpy(), columns=CFG.classes)
+        # pred_labels = [f'pred_{l}' for l in CFG.classes]
+        p_df = pd.DataFrame(preds.sigmoid().detach().cpu().numpy(), columns=pred_labels)
+
+        results_df = pd.DataFrame(ids, columns = ['ids'])
+
+        results_df = pd.concat([results_df, t_df, p_df], axis=1)
+    
+        return results_df
+
+        # return preds, ids, targets
+
     def step(self, batch, batch_idx, mode='train'):
         x, y = batch
 
@@ -578,15 +578,39 @@ class GeMModel(pl.LightningModule):
 model = GeMModel(CFG)
 
 # %%
-foo = model(x)
+preds= model.predict_step((x, ids, y))
 
 # %%
-x.shape, foo.shape
+preds.shape
+
+# %%
+preds.head(2)
 
 # %%
 
 # %% [markdown]
-# ### Select healthy files
+# ### Inference
+
+# %%
+CFG.ckpt_path
+
+# %%
+model = GeMModel.load_from_checkpoint(checkpoint_path=CFG.ckpt_path, cfg=CFG)
+
+accelerator = CFG.device
+
+trainer = pl.Trainer(
+    accelerator=accelerator,
+)
+
+print('model loaded')
+
+# %%
+model.to(accelerator)
+model.eval()
+model.freeze()
+
+accelerator
 
 # %%
 # add healthy images
@@ -594,197 +618,144 @@ x.shape, foo.shape
 files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
 
 # %%
-# files_df['cl'] = 'H'
-
-# %%
-train_cols = ['filename', 'cl', 'condition', 'series_description']
+train_cols = ['filename', 'cl', 'condition', 'series_description', 'instance_id']
 
 # %%
 files_df.loc[:, train_cols].head(2)
 
 # %%
 # exclude files with labels
-healthy_df = files_df.loc[:, train_cols]
-healthy_df = pd.merge(healthy_df, coords_df.loc[:, ['filename']],  how='left', on=['filename'], indicator=True)
+# healthy_df = pd.merge(healthy_df, coords_df.loc[:, ['filename']],  how='left', on=['filename'], indicator=True)
+healthy_df = files_df[~files_df.instance_id.isin(coords_df.instance_id.unique())]
+healthy_df = healthy_df.loc[:, train_cols]
 
 healthy_df.shape
 
 # %%
-files_df.shape
-
-# %%
-healthy_df['_merge'].value_counts()
-
-# %%
-coords_df.filename.nunique() +  122672
-
-# %%
-healthy_df = healthy_df[healthy_df['_merge'] == 'left_only']
-healthy_df.shape
+files_df[~files_df.instance_id.isin(coords_df.instance_id.unique())].shape
 
 # %%
 healthy_df.head(2)
 
-# %% [markdown]
-# ### Split
-
 # %%
-from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
-
-# %%
-positive_files = coords_df.filename.nunique()
-positive_files
-
-# %%
-healthy_df.sample(positive_files).shape
-
-# %%
-coords_df.shape
-
-# %%
-train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.sample(positive_files).loc[:, train_cols]], ignore_index=True)
-train_df.shape
-
-# %%
-sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
-train_idx, val_idx = next(sss.split(train_df.filename, train_df.cl))
-
-t_df = train_df.iloc[train_idx]
-v_df = train_df.iloc[val_idx]
-
-t_df.shape, v_df.shape
+healthy_df = pd.concat([healthy_df, coords_df], ignore_index=True)
 
 # %% [markdown]
 # #### Filter classes
 
 # %%
+healthy_df.condition.value_counts()
+
+# %%
 CFG.classes
 
 # %%
-t_df[t_df['condition'].isin(CFG.classes)].shape, v_df[v_df['condition'].isin(CFG.classes)].shape
+healthy_df = healthy_df[healthy_df['condition'].isin(CFG.classes)]
 
 # %%
-t_df = t_df[t_df['condition'].isin(CFG.classes)]
-v_df = v_df[v_df['condition'].isin(CFG.classes)]
+healthy_df.shape
 
 # %% [markdown]
-# ### Train
+# #### Predict
 
 # %%
 CFG.BATCH_SIZE, CFG.device
 
 # %%
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
-len(dm.train_dataloader()), len(dm.val_dataloader())
+dm = inference_datamodule(healthy_df, tfs=val_tfs)
 
 # %%
-run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.comment}'
-run_name
+trainer = pl.Trainer(accelerator=CFG.device)
+predictions = trainer.predict(model, dataloaders=dm)
 
 # %%
-wandb_logger = WandbLogger(
-    name=run_name,
-    project=CFG.project,
-    job_type='train',
-    save_dir=CFG.RESULTS_DIR,
-    # config=cfg,
-)
-
-loss_ckpt = pl.callbacks.ModelCheckpoint(
-    monitor='val/loss',
-    auto_insert_metric_name=False,
-    dirpath=CFG.CKPT_DIR / run_name,
-    filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
-    save_top_k=2,
-    mode='min',
-)
-
-# acc_ckpt = pl.callbacks.ModelCheckpoint(
-#     monitor='val/acc',
-#     auto_insert_metric_name=False,
-#     dirpath=CFG.CKPT_DIR / run_name,
-#     filename='ep_{epoch:02d}_acc_{val/acc:.5f}',
-#     save_top_k=2,
-#     mode='max',
-# )
-
-lr_monitor = LearningRateMonitor(logging_interval='step')
+len(predictions)
 
 # %%
-trainer = pl.Trainer(
-    max_epochs=CFG.N_EPOCHS,
-    deterministic=True,
-    accelerator=CFG.device,
-    default_root_dir=CFG.RESULTS_DIR,
-    gradient_clip_val=0.5, 
-    # gradient_clip_algorithm="value",
-    logger=wandb_logger,
-    callbacks=[loss_ckpt, lr_monitor],
-)
-
-# %%
-model = GeMModel(CFG)
+predictions = pd.concat(predictions, ignore_index=True)
+predictions.shape
 
 # %% [markdown]
-# #### Fit
+# ### Analyze results
 
 # %%
-trainer.fit(model, dm)
+predictions[predictions.H == 0].sample(5)
 
 # %%
-# np.array([0.0625, 0.9375, 0.8125, 0.0000, 1.0000, 1.0000, 0.0938, 0.8125, 0.7500,
-#         0.8750, 0.2500, 0.0625, 0.9688, 0.9062, 0.9688, 0.1875, 1.0000, 0.6562,
-#         0.7500, 0.7812, 0.6875, 0.8438, 0.8750, 0.9688, 0.4062, 0.2188]).mean()
+predictions[(predictions.pred_LSS < 0.5) & (predictions.LSS == 1)].sample(5)
 
 # %%
-wandb.finish()
+predictions[(predictions.pred_LSS > 0.5) & (predictions.LSS == 0)].sample(5)
+
+# %%
+predictions[(predictions.pred_LSS > 0.5) & (predictions.LSS == 0)].shape, predictions[predictions.LSS == 1].shape
+
+# %%
+predictions.shape
+
+# %%
+preds = torch.tensor(predictions[pred_labels].to_numpy())
+targets = torch.tensor(predictions[labels].to_numpy())
+
+preds.shape, targets.shape
+
+# %%
+macc(preds, targets)
+
+# %%
+import torchmetrics.functional.classification as tmf
 
 # %% [markdown]
-# ### Predict
+# #### Precision
 
 # %%
-x, y = next(iter(dm.train_dataloader()))
+tmf.multilabel_precision(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.5)
 
 # %%
-# foo = model(x)
-foo = model(x.to(CFG.device)).detach().cpu()
-foo.shape
-
-# %%
-macc = tm.classification.MultilabelAccuracy(num_labels=26)
-mapp = tm.classification.MultilabelPrecision(num_labels=26)
-marr = tm.classification.MultilabelRecall(num_labels=26)
-maff = tm.classification.MultilabelF1Score(num_labels=26)
-
-# %%
-macc(foo, y), mapp(foo, y), marr(foo, y), maff(foo, y)
-
-# %%
-((foo.sigmoid() > 0.5) == y).sum()/16/26
-
-# %%
-((foo.sigmoid() > 0.5) != y).sum()
-
-# %%
-(1037.3 - 1026)/1026 * 100
-
-# %%
-torch.argwhere(y > 0).T
-
-# %%
-bar = foo.sigmoid().numpy()
-np.argwhere(bar > 0.5).T
-
-# %%
-bar[12]
+tmf.multilabel_precision(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.3)
 
 # %% [markdown]
-# # 
+# #### Recall
 
 # %%
-torch.nn.functional.sigmoid(foo[0])
+tmf.multilabel_recall(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.5)
 
 # %%
-# foo.sigmoid().topk(1, dim=-1)
+tmf.multilabel_recall(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.3)
+
+# %% [markdown]
+# #### F1 score
+
+# %%
+tmf.multilabel_f1_score(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.8)
+
+# %%
+tmf.multilabel_f1_score(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.4)
+
+# %%
+from torchmetrics.classification import MultilabelConfusionMatrix
+
+# %%
+metric = MultilabelConfusionMatrix(num_labels=len(CFG.classes))
+metric.update(preds, targets.type(torch.int))
+fig_, ax_ = metric.plot()
+
+# %%
+
+# %%
+# tmf.multilabel_confusion_matrix(preds, targets.type(torch.int), num_labels=len(CFG.classes))
+
+# %%
+
+# %%
+
+# %%
+
+# %% [markdown]
+# ### Save results
+
+# %%
+
+# %%
 
 # %%

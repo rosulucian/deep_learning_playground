@@ -72,4 +72,65 @@ class rsna_dataset(torch.utils.data.Dataset):
         target = torch.from_numpy(target).float()
         
         return img, target
+
+class rsna_lstm_dataset(torch.utils.data.Dataset):
+    def __init__(self, train_df, coords_df, cfg, tfs=None, mode='train'):
+        super().__init__()
+
+        self.train_df = train_df
+        self.len = len(self.train_df)
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, index: int):
+        study = self.train_df[index]
+
+        
+
+class rsna_inf_dataset(torch.utils.data.Dataset):
+    def __init__(self, coords_df, cfg, tfs=None, mode='train'):
+        super().__init__()
+        
+        self.df = coords_df
+        self.files = list(coords_df.filename.unique())
+        self.len = len(self.files)
+
+        self.classes = cfg.classes
+        self.num_classes = len(self.classes)
+
+        self.class2id = {b: i for i, b in enumerate(self.classes)}
+        
+        self.tfs = tfs
+
+        self.mode = mode
+        
+    def __len__(self):
+        return self.len
+    
+    def __getitem__(self, index: int):
+        filename = self.files[index]
+
+        img = np.array(pil.Image.open(filename), dtype=np.float32)
+        img = np.stack([img, img, img], axis = 0)
+
+        if self.tfs is not None:
+            img = img.transpose(1,2,0)
+            img = self.tfs(image=img)['image']
+            img = img.transpose(2,0,1)
+
+        target = np.zeros(self.num_classes, dtype=np.float32)
+
+        # labels = self.df[self.df['filename'] ==  filename].cl.to_list()
+        labels = self.df[self.df['filename'] ==  filename].condition.to_list()
+
+        for label in labels:
+            target[self.class2id[label]] = 1
+
+        target = torch.from_numpy(target).float()
+
+        instance_id = self.df[self.df['filename'] ==  filename].instance_id.values[0]
+        
+        return img, instance_id, target
+        
         
