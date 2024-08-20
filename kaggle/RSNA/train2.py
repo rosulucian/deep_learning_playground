@@ -85,6 +85,10 @@ def seed_torch(seed):
 # TODO: maybe use condition and level for classes
 classes = ['SCS', 'RNFN', 'LNFN', 'LSS', 'RSS'] + ['H'] # add healthy class
 
+# classes = ['SCS', 'RNFN', 'LNFN'] + ['H'] # add healthy class
+
+# classes = ['LSS', 'RSS'] + ['H'] # add healthy class
+
 # classes = ['SCSL1L2', 'SCSL2L3', 'SCSL3L4', 'SCSL4L5', 'SCSL5S1', 'RNFNL4L5',
 #        'RNFNL5S1', 'RNFNL3L4', 'RNFNL1L2', 'RNFNL2L3', 'LNFNL1L2',
 #        'LNFNL4L5', 'LNFNL5S1', 'LNFNL2L3', 'LNFNL3L4', 'LSSL1L2',
@@ -99,8 +103,8 @@ train_dir = Path('E:\data\RSNA2024')
 
 class CFG:
 
-    project = 'rsna-local'
-    comment = 'conditions-only'
+    project = 'rsna-2'
+    comment = 'bottleneck'
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
@@ -195,8 +199,6 @@ coords_df.instance_id.nunique(), coords_df.ss_id.nunique(), files_df.shape[0]
 coords_df.sample(3)
 
 # %%
-
-# %%
 files_df.shape, coords_df.shape
 
 # %%
@@ -227,7 +229,10 @@ coords_df[coords_df['instance_id'] == inst_id].cl.to_list()
 from dataset import rsna_dataset
 
 # %%
-dset = rsna_dataset(coords_df, CFG)
+selection = coords_df[coords_df['condition'].isin(CFG.classes)]
+
+# %%
+dset = rsna_dataset(selection, CFG)
 
 print(dset.__len__())
 
@@ -302,11 +307,12 @@ class rsna_datamodule(pl.LightningDataModule):
         
         return val_loader
 
-
 # %%
-t_df = coords_df[:-100]
+
+
+t_df = selection[:-100]
 # t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
-v_df = coords_df[-100:]
+v_df = selection[-100:]
 
 CFG2 = CFG()
 # CFG2 = copy.deepcopy(CFG)
@@ -466,16 +472,20 @@ class GeMModel(pl.LightningModule):
         
         out_indices = (3, 4)
 
+        self.bottleneck_dim = 64
+
         self.criterion = FocalLossBCE()
 
-        wrapped_metric = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multiacc/')
+        wrapped_acc = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multiacc/')
+        wrapped_f1 = ClasswiseWrapper(MultilabelF1Score(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multif1/')
         
         metrics = MetricCollection({
-            'macc': MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
-            'macc_none': wrapped_metric,
+            # 'macc': MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
+            'none_acc': wrapped_acc,
             'mpr': MultilabelPrecision(num_labels=self.cfg.N_LABELS),
             'mrec': MultilabelRecall(num_labels=self.cfg.N_LABELS),
-            'f1': MultilabelF1Score(num_labels=self.cfg.N_LABELS)
+            'f1': MultilabelF1Score(num_labels=self.cfg.N_LABELS),
+            'none_f1': wrapped_f1,
         })
 
         self.train_metrics = metrics.clone(prefix='train/')
@@ -499,13 +509,23 @@ class GeMModel(pl.LightningModule):
         self.mid_features = np.sum(feature_dims)
         
         self.neck = torch.nn.BatchNorm1d(self.mid_features)
-        self.head = torch.nn.Linear(self.mid_features, self.cfg.N_LABELS)
+        self.bottleneck = torch.nn.Linear(self.mid_features, self.bottleneck_dim)
+        self.bottleneck_bn = torch.nn.BatchNorm1d(self.bottleneck_dim)
+        self.head = torch.nn.Linear(self.bottleneck_dim, self.cfg.N_LABELS)
 
-    def forward(self, x):
+    def pre_forward(self, x):
         ms = self.backbone(x)
         
         h = torch.cat([global_pool(m) for m, global_pool in zip(ms, self.global_pools)], dim=1)
         x = self.neck(h)
+        x = self.bottleneck(x)
+        x = self.bottleneck_bn(x)
+
+        return x
+    
+    def forward(self, x):
+        x = self.pre_forward(x)
+
         x = self.head(x)
         
         return x
@@ -566,9 +586,6 @@ class GeMModel(pl.LightningModule):
 
 # %%
 model = GeMModel(CFG)
-
-# %%
-model.mid_features
 
 # %%
 foo = model(x)
@@ -646,6 +663,19 @@ t_df = train_df.iloc[train_idx]
 v_df = train_df.iloc[val_idx]
 
 t_df.shape, v_df.shape
+
+# %% [markdown]
+# #### Filter classes
+
+# %%
+CFG.classes
+
+# %%
+t_df[t_df['condition'].isin(CFG.classes)].shape, v_df[v_df['condition'].isin(CFG.classes)].shape
+
+# %%
+t_df = t_df[t_df['condition'].isin(CFG.classes)]
+v_df = v_df[v_df['condition'].isin(CFG.classes)]
 
 # %% [markdown]
 # ### Train
