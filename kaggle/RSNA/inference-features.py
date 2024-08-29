@@ -106,7 +106,8 @@ class CFG:
     project = 'rsna-2'
     comment = 'all-labels'
 
-    ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps all-labels\ep_03_loss_0.15231.ckpt")
+    ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps bottleneck\ep_03_loss_0.14918.ckpt")
+    embeds_path = Path(r"E:\data\RSNA2024\embeddings")
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
@@ -457,6 +458,8 @@ class GeMModel(pl.LightningModule):
         
         out_indices = (3, 4)
 
+        self.bottleneck_dim = 64
+
         self.criterion = FocalLossBCE()
 
         wrapped_acc = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multiacc/')
@@ -492,13 +495,23 @@ class GeMModel(pl.LightningModule):
         self.mid_features = np.sum(feature_dims)
         
         self.neck = torch.nn.BatchNorm1d(self.mid_features)
-        self.head = torch.nn.Linear(self.mid_features, self.cfg.N_LABELS)
+        self.bottleneck = torch.nn.Linear(self.mid_features, self.bottleneck_dim)
+        self.bottleneck_bn = torch.nn.BatchNorm1d(self.bottleneck_dim)
+        self.head = torch.nn.Linear(self.bottleneck_dim, self.cfg.N_LABELS)
 
-    def forward(self, x):
+    def pre_forward(self, x):
         ms = self.backbone(x)
         
         h = torch.cat([global_pool(m) for m, global_pool in zip(ms, self.global_pools)], dim=1)
         x = self.neck(h)
+        x = self.bottleneck(x)
+        x = self.bottleneck_bn(x)
+
+        return x
+    
+    def forward(self, x):
+        x = self.pre_forward(x)
+
         x = self.head(x)
         
         return x
@@ -516,23 +529,6 @@ class GeMModel(pl.LightningModule):
             
             # return [optimizer], [LRscheduler]
             return optimizer
-
-    def predict_step(self, batch):
-        imgs, ids, targets = batch
-
-        preds = self(imgs)
-
-        t_df = pd.DataFrame(targets.detach().cpu().numpy(), columns=CFG.classes)
-        # pred_labels = [f'pred_{l}' for l in CFG.classes]
-        p_df = pd.DataFrame(preds.sigmoid().detach().cpu().numpy(), columns=pred_labels)
-
-        results_df = pd.DataFrame(ids, columns = ['ids'])
-
-        results_df = pd.concat([results_df, t_df, p_df], axis=1)
-    
-        return results_df
-
-        # return preds, ids, targets
 
     def step(self, batch, batch_idx, mode='train'):
         x, y = batch
@@ -575,18 +571,41 @@ class GeMModel(pl.LightningModule):
 
 
 # %%
-model = GeMModel(CFG)
+class featureModel(pl.LightningModule):
+    def __init__(self, model):
+        super().__init__()
+
+        self.model = model
+
+
+    def forward(self, x):
+        x = self.model.pre_forward(x)
+        
+        return x
+
+    def predict_step(self, batch):
+        imgs, ids, targets = batch
+
+        preds = self(imgs)
+    
+        return preds.sigmoid().detach().cpu().numpy(), ids
+
 
 # %%
-preds= model.predict_step((x, ids, y))
+model = GeMModel(CFG)
+fmodel = featureModel(model)
+
+# %%
+preds, ids = fmodel.predict_step((x, ids, y))
 
 # %%
 preds.shape
 
 # %%
-preds.head(2)
+preds[0]
 
 # %%
+ES-62074AE48082
 
 # %% [markdown]
 # ### Inference
@@ -596,6 +615,7 @@ CFG.ckpt_path
 
 # %%
 model = GeMModel.load_from_checkpoint(checkpoint_path=CFG.ckpt_path, cfg=CFG)
+model = featureModel(model)
 
 accelerator = CFG.device
 
@@ -655,6 +675,9 @@ healthy_df = healthy_df[healthy_df['condition'].isin(CFG.classes)]
 # %%
 healthy_df.shape
 
+# %%
+files_df.shape
+
 # %% [markdown]
 # #### Predict
 
@@ -662,6 +685,7 @@ healthy_df.shape
 CFG.BATCH_SIZE, CFG.device
 
 # %%
+# dm = inference_datamodule(healthy_df[:248], tfs=val_tfs)
 dm = inference_datamodule(healthy_df, tfs=val_tfs)
 
 # %%
@@ -672,89 +696,18 @@ predictions = trainer.predict(model, dataloaders=dm)
 len(predictions)
 
 # %%
-predictions = pd.concat(predictions, ignore_index=True)
-predictions.shape
-
-# %% [markdown]
-# ### Analyze results
-
-# %%
-predictions[predictions.H == 0].sample(5)
-
-# %%
-predictions[(predictions.pred_LSS < 0.5) & (predictions.LSS == 1)].sample(5)
-
-# %%
-predictions[(predictions.pred_LSS > 0.5) & (predictions.LSS == 0)].sample(5)
-
-# %%
-predictions[(predictions.pred_LSS > 0.5) & (predictions.LSS == 0)].shape, predictions[predictions.LSS == 1].shape
-
-# %%
-predictions.shape
-
-# %%
-preds = torch.tensor(predictions[pred_labels].to_numpy())
-targets = torch.tensor(predictions[labels].to_numpy())
-
-preds.shape, targets.shape
-
-# %%
-macc(preds, targets)
-
-# %%
-import torchmetrics.functional.classification as tmf
-
-# %% [markdown]
-# #### Precision
-
-# %%
-tmf.multilabel_precision(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.5)
-
-# %%
-tmf.multilabel_precision(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.3)
-
-# %% [markdown]
-# #### Recall
-
-# %%
-tmf.multilabel_recall(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.5)
-
-# %%
-tmf.multilabel_recall(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.3)
-
-# %% [markdown]
-# #### F1 score
-
-# %%
-tmf.multilabel_f1_score(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.8)
-
-# %%
-tmf.multilabel_f1_score(preds, targets, num_labels=len(CFG.classes), average='none', threshold=0.4)
-
-# %%
-from torchmetrics.classification import MultilabelConfusionMatrix
-
-# %%
-metric = MultilabelConfusionMatrix(num_labels=len(CFG.classes))
-metric.update(preds, targets.type(torch.int))
-fig_, ax_ = metric.plot()
-
-# %%
-
-# %%
-# tmf.multilabel_confusion_matrix(preds, targets.type(torch.int), num_labels=len(CFG.classes))
-
-# %%
-
-# %%
+predictions[0][0].shape
 
 # %%
 
 # %% [markdown]
-# ### Save results
+# ### Save embeddings
 
 # %%
+for (embeds, ids) in predictions:
+    for emb, file in zip(embeds, ids):
+        np.save(CFG.embeds_path / f'{file}.npy', emb)
+        # print(CFG.embeds_path / f'{file}.npy')
 
 # %%
 

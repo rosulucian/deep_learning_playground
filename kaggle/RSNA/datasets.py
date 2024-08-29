@@ -58,6 +58,9 @@ train_desc_df['ss_id'] = train_desc_df.apply(lambda row: f'{str(row["study_id"])
 train_df.head()
 
 # %%
+train_df.isna().sum(axis=1).sum()
+
+# %%
 cols = train_df.columns[1:]
 # first = [c.split('_')[:-2] for c in cols]
 # last = [c.split('_')[-2:] for c in cols]
