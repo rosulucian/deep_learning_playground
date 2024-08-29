@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 import albumentations as A
 
+import torch
+import torch.nn.functional as F
+
 from pathlib import Path
 from albumentations.pytorch import ToTensorV2
 
@@ -74,19 +77,41 @@ class rsna_dataset(torch.utils.data.Dataset):
         return img, target
 
 class rsna_lstm_dataset(torch.utils.data.Dataset):
-    def __init__(self, train_df, coords_df, cfg, tfs=None, mode='train'):
+    def __init__(self, train_df, files_df, cfg, mode='train'):
         super().__init__()
 
+        self.cfg = cfg
+
         self.train_df = train_df
-        self.len = len(self.train_df)
+        self.studies = train_df.study_id.unique().tolist()
+        self.len = train_df.study_id.nunique()
+
+        self.files_df = files_df
 
     def __len__(self):
         return self.len
 
     def __getitem__(self, index: int):
-        study = self.train_df[index]
+        entry = self.train_df.iloc[index]
+        study_id = entry.study_id
 
+        files_df = self.files_df[self.files_df.study_id == study_id]
+
+        files = []
+
+        # TODO: ieterate over list of series_description to ensure order
+        for name, group in files_df.sort_values('proj').groupby('series_description'):
+            files += group.instance_id.to_list()
+
+        files = [self.cfg.embeds_path / f'{f}.npy' for f in files]
+
+        embeds = [np.load(f) for f in files]
+        embeds = np.stack(embeds)
         
+        targets = torch.tensor(entry.values.flatten().tolist()[1:])
+        # targets = F.one_hot(targets).T
+
+        return torch.from_numpy(embeds), targets
 
 class rsna_inf_dataset(torch.utils.data.Dataset):
     def __init__(self, coords_df, cfg, tfs=None, mode='train'):
