@@ -654,7 +654,7 @@ t_df.shape, v_df.shape
 CFG.BATCH_SIZE, CFG.device
 
 # %%
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = rsna_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 len(dm.train_dataloader()), len(dm.val_dataloader())
 
 # %%
