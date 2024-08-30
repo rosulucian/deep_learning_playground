@@ -108,6 +108,7 @@ class CFG:
 
     ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps bottleneck\ep_03_loss_0.14918.ckpt")
     embeds_path = Path(r"E:\data\RSNA2024\embeddings")
+    stacked_path = Path(r"E:\data\RSNA2024\embeddings_stacked")
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
@@ -115,6 +116,7 @@ class CFG:
     image_size = 256
     
     ROOT_FOLDER = train_dir
+    DEST_FOLDER = train_dir
     IMAGES_DIR = ROOT_FOLDER / 'train_images'
     PNG_DIR = ROOT_FOLDER / f'pngs_{image_size}'
     FILES_CSV = ROOT_FOLDER / 'train_files.csv'
@@ -577,18 +579,24 @@ class featureModel(pl.LightningModule):
 
         self.model = model
 
-
     def forward(self, x):
-        x = self.model.pre_forward(x)
+        embeds = self.model.pre_forward(x)
+        preds = self.model.head(embeds)
         
-        return x
+        return preds, embeds
 
     def predict_step(self, batch):
         imgs, ids, targets = batch
 
-        preds = self(imgs)
+        preds, embeds = self(imgs)
+
+        t_df = pd.DataFrame(targets.detach().cpu().numpy(), columns=CFG.classes)
+        p_df = pd.DataFrame(preds.sigmoid().detach().cpu().numpy(), columns=pred_labels)
+
+        results_df = pd.DataFrame(ids, columns = ['ids'])
+        results_df = pd.concat([results_df, t_df, p_df], axis=1)
     
-        return preds.sigmoid().detach().cpu().numpy(), ids
+        return embeds.detach().cpu().numpy(), results_df, ids
 
 
 # %%
@@ -596,16 +604,22 @@ model = GeMModel(CFG)
 fmodel = featureModel(model)
 
 # %%
-preds, ids = fmodel.predict_step((x, ids, y))
+preds, results, ids = fmodel.predict_step((x, ids, y))
 
 # %%
 preds.shape
 
 # %%
+ids[:4]
+
+# %%
 preds[0]
 
 # %%
-ES-62074AE48082
+results.shape
+
+# %%
+results.head(2)
 
 # %% [markdown]
 # ### Inference
@@ -633,8 +647,6 @@ model.freeze()
 accelerator
 
 # %%
-# add healthy images
-
 files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
 
 # %%
@@ -642,41 +654,6 @@ train_cols = ['filename', 'cl', 'condition', 'series_description', 'instance_id'
 
 # %%
 files_df.loc[:, train_cols].head(2)
-
-# %%
-# exclude files with labels
-# healthy_df = pd.merge(healthy_df, coords_df.loc[:, ['filename']],  how='left', on=['filename'], indicator=True)
-healthy_df = files_df[~files_df.instance_id.isin(coords_df.instance_id.unique())]
-healthy_df = healthy_df.loc[:, train_cols]
-
-healthy_df.shape
-
-# %%
-files_df[~files_df.instance_id.isin(coords_df.instance_id.unique())].shape
-
-# %%
-healthy_df.head(2)
-
-# %%
-healthy_df = pd.concat([healthy_df, coords_df], ignore_index=True)
-
-# %% [markdown]
-# #### Filter classes
-
-# %%
-healthy_df.condition.value_counts()
-
-# %%
-CFG.classes
-
-# %%
-healthy_df = healthy_df[healthy_df['condition'].isin(CFG.classes)]
-
-# %%
-healthy_df.shape
-
-# %%
-files_df.shape
 
 # %% [markdown]
 # #### Predict
@@ -686,7 +663,7 @@ CFG.BATCH_SIZE, CFG.device
 
 # %%
 # dm = inference_datamodule(healthy_df[:248], tfs=val_tfs)
-dm = inference_datamodule(healthy_df, tfs=val_tfs)
+dm = inference_datamodule(files_df, tfs=val_tfs)
 
 # %%
 trainer = pl.Trainer(accelerator=CFG.device)
@@ -696,18 +673,87 @@ predictions = trainer.predict(model, dataloaders=dm)
 len(predictions)
 
 # %%
-predictions[0][0].shape
+predictions[0][0].shape, predictions[0][1].shape, len(predictions[0][2])
 
 # %%
+predictions[0][2][:4]
+
+# %%
+predictions[0][1].head(2)
+
+# %%
+(preds, results, ids) = list(map(list, zip(*predictions)))
 
 # %% [markdown]
 # ### Save embeddings
 
+# %% [markdown]
+# #### Save results
+
 # %%
-for (embeds, ids) in predictions:
+results = pd.concat(results, ignore_index=True)
+results.shape
+
+# %%
+results.sample(2)
+
+# %%
+results['study_id'] = results['ids'].apply(lambda x: x.split('_')[0])
+results['series_id'] = results['ids'].apply(lambda x: (x.split('_')[1]))
+results['instance'] = results['ids'].apply(lambda x: int(x.split('_')[-1]))
+
+# %%
+results.head(2)
+
+# %%
+results.study_id.nunique()
+
+# %%
+results.instance.dtype
+
+# %%
+results = results.sort_values(by=['study_id', 'series_id', 'instance'], ascending=[True, True, True],ignore_index=True)
+
+results.shape
+
+# %%
+results[results['study_id'] == '100206310'].head(-40)
+
+# %%
+results.to_csv(CFG.DEST_FOLDER / 'predictions.csv', index=False)
+
+# %% [markdown]
+# #### Save embeddings
+
+# %%
+stacked = np.vstack(preds)
+stacked.shape
+
+# %%
+for (embeds, ids) in zip(preds, ids):
     for emb, file in zip(embeds, ids):
         np.save(CFG.embeds_path / f'{file}.npy', emb)
         # print(CFG.embeds_path / f'{file}.npy')
+
+# %%
+for x, y in results.groupby(['study_id', 'series_id']):
+# for x, y in results.loc[:40].groupby(['study_id', 'series_id']):
+    # print(x,type(y))
+    
+    filename = CFG.stacked_path / f'{x[0]}_{x[1]}.npy'
+
+    files = [CFG.embeds_path / f'{file}.npy' for file in y.ids.tolist()]
+
+    files = [np.load(f) for f in files]
+
+    # print(len(files), files[0].shape)
+
+    stacked = np.vstack(files)
+
+    np.save(filename, stacked)
+    
+    # print(stacked.shape, filename)
+    # print(len(y.ids.tolist()))
 
 # %%
 

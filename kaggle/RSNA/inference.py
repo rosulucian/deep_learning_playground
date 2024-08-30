@@ -512,9 +512,6 @@ class GeMModel(pl.LightningModule):
 
             return [optimizer], [scheduler_warmup]
         else:
-            # LRscheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.2)
-            
-            # return [optimizer], [LRscheduler]
             return optimizer
 
     def predict_step(self, batch):
