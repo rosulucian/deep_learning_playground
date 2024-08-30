@@ -106,8 +106,8 @@ train_dir = Path('E:\data\RSNA2024')
 
 class CFG:
 
-    project = 'rsna-2'
-    comment = 'bottleneck'
+    project = 'lstm'
+    comment = 'first'
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
@@ -124,6 +124,7 @@ class CFG:
 
     # ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps all-labels\ep_03_loss_0.15231.ckpt")
     embeds_path = Path(r"E:\data\RSNA2024\embeddings")
+    stacked_path = Path(r"E:\data\RSNA2024\embeddings_stacked")
 
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
@@ -139,7 +140,7 @@ class CFG:
     MIXUP = False
 
     ### training
-    BATCH_SIZE = 1
+    BATCH_SIZE = 16
     
     ### Optimizer
     N_EPOCHS = 10
@@ -248,7 +249,7 @@ train_df[train_df.study_id == study_id].values.flatten().tolist()[1:]
 from dataset import rsna_lstm_dataset
 
 # %%
-dset = rsna_lstm_dataset(train_df, files_df, CFG)
+dset = rsna_lstm_dataset(train_df, files_df, CFG.embeds_path)
 
 print(dset.__len__())
 
@@ -268,21 +269,20 @@ seq[0]
 # ### Data Module
 
 # %%
-from dataset import rsna_lstm_dataset
-
-# %%
-from torch.nn.utils.rnn import pad_sequence
-
-def collate_fn_padd(data):
-    tensors, targets = zip(*data)
-    features = pad_sequence(tensors, batch_first=True)
-    targets = torch.stack(targets)
-    return features, targets
+from dataset import rsna_lstm_dataset, collate_fn_padd
 
 
 # %%
+# from torch.nn.utils.rnn import pad_sequence
+
+# def collate_fn_padd(data):
+#     tensors, targets = zip(*data)
+#     features = pad_sequence(tensors, batch_first=True)
+#     targets = torch.stack(targets)
+#     return features, targets
+    
 class lstm_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, files_df, cfg=CFG):
+    def __init__(self, train_df, val_df, files_df, cfg):
         super().__init__()
         
         self.train_df = train_df
@@ -297,7 +297,7 @@ class lstm_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = rsna_lstm_dataset(self.train_df, self.files_df, self.cfg, mode='train')
+        train_ds = rsna_lstm_dataset(self.train_df, self.files_df, self.cfg.embeds_path)
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -306,14 +306,14 @@ class lstm_datamodule(pl.LightningDataModule):
             pin_memory=False,
             drop_last=False,
             shuffle=True,
-            # persistent_workers=True,
+            persistent_workers=True,
             num_workers=self.num_workers,
         )
         
         return train_loader
         
     def val_dataloader(self):
-        val_ds = rsna_lstm_dataset(self.val_df, self.files_df, self.cfg, mode='val')
+        val_ds = rsna_lstm_dataset(self.val_df, self.files_df, self.cfg.embeds_path)
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -336,16 +336,17 @@ v_df = train_df[-100:]
 
 CFG2 = CFG()
 # CFG2 = copy.deepcopy(CFG)
-CFG2.BATCH_SIZE = 2
-CFG2.num_workers = 2
+CFG2.BATCH_SIZE = 8
+CFG2.num_workers = 4
 
-dm = lstm_datamodule(t_df, v_df, files_df, cfg=CFG2)
+dm = lstm_datamodule(t_df, v_df, files_df, CFG2)
 
 x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
 
-
 # %%
+del dm
+
 
 # %% [markdown]
 # ### Loss function
@@ -396,26 +397,40 @@ class GeM(torch.nn.Module):
 # %% [markdown]
 # ### Model
 
+# %% [markdown]
+# #### Definition
+
 # %%
 class LSTMClassifier(pl.LightningModule):
     def __init__(self, cfg=CFG):
         super(LSTMClassifier, self).__init__()
+
+        self.cfg = cfg
         
         self.input_dim = cfg.input_dim
         self.hidden_dim = cfg.hidden_dim
         self.target_size = cfg.target_size
 
-        self.criterion = torch.nn.CrossEntropyLoss()
+        self.criterion = torch.nn.CrossEntropyLoss(reduction='none')
 
         self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=1, batch_first=True)
-
         self.fc = nn.Linear(self.hidden_dim, self.target_size)
+        self.classifiers = torch.nn.ModuleList([nn.Linear(self.target_size, 3) for i in range(25)])
 
+        wrapped_metric = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multiacc/')
+        
+        metrics = MetricCollection({
+            'macc': MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
+            'macc_none': wrapped_metric,
+            'mpr': MultilabelPrecision(num_labels=self.cfg.N_LABELS),
+            'mrec': MultilabelRecall(num_labels=self.cfg.N_LABELS),
+            'f1': MultilabelF1Score(num_labels=self.cfg.N_LABELS)
+        })
 
-        self.classifiers = [nn.Linear(self.target_size, 3) for i in range(25)]
+        self.train_metrics = metrics.clone(prefix='train/')
+        self.valid_metrics = metrics.clone(prefix='val/')
 
     def forward(self, sequence):
-
         #  seq: (seq_len, bs, num_features)
         lstm_out, (h, c) = self.lstm(sequence)
         
@@ -433,7 +448,49 @@ class LSTMClassifier(pl.LightningModule):
 
         loss = self.criterion(preds, y)
 
+        # https://discuss.pytorch.org/t/pytorchs-non-deterministic-cross-entropy-loss-and-the-problem-of-reproducibility/172180/9
+        loss = loss.mean()
+
+        if mode == 'train':
+            output = self.train_metrics(preds, y)
+            self.log_dict(output)
+        else:
+            self.valid_metrics.update(preds, y)
+
+        self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
+
         return loss
+
+    def training_step(self, batch, batch_idx):
+        loss = self.step(batch, batch_idx, mode='train')
+        
+        return loss
+        
+    def validation_step(self, batch, batch_idx):
+        loss = self.step(batch, batch_idx, mode='val')
+    
+        return loss
+
+    def on_train_epoch_end(self):
+        self.train_metrics.reset()
+
+    def on_validation_epoch_end(self):
+        output = self.valid_metrics.compute()
+        self.log_dict(output)
+
+        self.valid_metrics.reset()
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
+        
+        if self.cfg.USE_SCHD:
+            scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.cfg.COS_EPOCHS)
+            scheduler_warmup = GradualWarmupSchedulerV2(optimizer, multiplier=10, total_epoch=self.cfg.WARM_EPOCHS, after_scheduler=scheduler_cosine)
+
+            return [optimizer], [scheduler_warmup]
+        else:
+            return optimizer
+
 
 # %% [markdown]
 # #### building blocks
@@ -496,13 +553,104 @@ y.softmax(dim=1)
 # ### Split
 
 # %%
+from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
+
+# %%
+train_df.shape
+
+# %%
+train_df.sample(2)
+
+# %%
+train_df.iloc[:,1:].shape
+
+# %%
+sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
+train_idx, val_idx = next(sss.split(train_df.study_id, train_df.iloc[:,1:]))
+
+t_df = train_df.iloc[train_idx]
+v_df = train_df.iloc[val_idx]
+
+t_df.shape, v_df.shape
+
+# %%
+
+# %% [markdown]
+# ### Train
+
+# %%
+CFG.BATCH_SIZE, CFG.device
+
+# %%
+dm = lstm_datamodule(t_df, v_df, files_df, cfg=CFG)
+
+len(dm.train_dataloader()), len(dm.val_dataloader())
+
+# %%
+run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.comment}'
+run_name
+
+# %%
+wandb_logger = WandbLogger(
+    name=run_name,
+    project=CFG.project,
+    job_type='train',
+    save_dir=CFG.RESULTS_DIR,
+    # config=cfg,
+)
+
+loss_ckpt = pl.callbacks.ModelCheckpoint(
+    monitor='val/loss',
+    auto_insert_metric_name=False,
+    dirpath=CFG.CKPT_DIR / run_name,
+    filename='ep_{epoch:02d}_loss_{val/loss:.5f}',
+    save_top_k=2,
+    mode='min',
+)
+
+# acc_ckpt = pl.callbacks.ModelCheckpoint(
+#     monitor='val/acc',
+#     auto_insert_metric_name=False,
+#     dirpath=CFG.CKPT_DIR / run_name,
+#     filename='ep_{epoch:02d}_acc_{val/acc:.5f}',
+#     save_top_k=2,
+#     mode='max',
+# )
+
+lr_monitor = LearningRateMonitor(logging_interval='step')
+
+# %%
+trainer = pl.Trainer(
+    max_epochs=CFG.N_EPOCHS,
+    deterministic=True,
+    accelerator=CFG.device,
+    default_root_dir=CFG.RESULTS_DIR,
+    gradient_clip_val=0.5, 
+    # gradient_clip_algorithm="value",
+    logger=wandb_logger,
+    callbacks=[loss_ckpt, lr_monitor],
+)
+
+# %%
+model = LSTMClassifier(CFG)
+
+# %%
 
 # %%
 
 # %%
 
 # %% [markdown]
-# ### Train
+# #### Fit
+
+# %%
+trainer.fit(model, dm)
+
+# %%
+
+# %%
+
+# %%
 
 # %%
 

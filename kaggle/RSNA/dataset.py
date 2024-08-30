@@ -33,6 +33,14 @@ img_std = (0.229, 0.224, 0.225)
 # num_classes = len(classes)
 # class2id = {b: i for i, b in enumerate(classes)}
 
+from torch.nn.utils.rnn import pad_sequence
+
+def collate_fn_padd(data):
+    tensors, targets = zip(*data)
+    features = pad_sequence(tensors, batch_first=True)
+    targets = torch.stack(targets)
+    return features, targets
+
 class rsna_dataset(torch.utils.data.Dataset):
     def __init__(self, coords_df, cfg, tfs=None, mode='train'):
         super().__init__()
@@ -77,10 +85,11 @@ class rsna_dataset(torch.utils.data.Dataset):
         return img, target
 
 class rsna_lstm_dataset(torch.utils.data.Dataset):
-    def __init__(self, train_df, files_df, cfg, mode='train'):
+    def __init__(self, train_df, files_df, embeds_path):
         super().__init__()
 
-        self.cfg = cfg
+        # self.cfg = cfg
+        self.embeds_path = embeds_path
 
         self.train_df = train_df
         self.studies = train_df.study_id.unique().tolist()
@@ -103,7 +112,8 @@ class rsna_lstm_dataset(torch.utils.data.Dataset):
         for name, group in files_df.sort_values('proj').groupby('series_description'):
             files += group.instance_id.to_list()
 
-        files = [self.cfg.embeds_path / f'{f}.npy' for f in files]
+        # files = [self.cfg.embeds_path / f'{f}.npy' for f in files]
+        files = [self.embeds_path / f'{f}.npy' for f in files]
 
         embeds = [np.load(f) for f in files]
         embeds = np.stack(embeds)
