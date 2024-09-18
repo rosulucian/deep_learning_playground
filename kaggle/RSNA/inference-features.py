@@ -106,7 +106,7 @@ class CFG:
     project = 'rsna-2'
     comment = 'all-labels'
 
-    ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps bottleneck\ep_03_loss_0.14918.ckpt")
+    ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps 128neck\ep_04_loss_0.17137.ckpt")
     embeds_path = Path(r"E:\data\RSNA2024\embeddings")
     stacked_path = Path(r"E:\data\RSNA2024\embeddings_stacked")
 
@@ -114,6 +114,7 @@ class CFG:
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
 
     image_size = 256
+    bottleneck_dim = 128
     
     ROOT_FOLDER = train_dir
     DEST_FOLDER = train_dir
@@ -460,7 +461,7 @@ class GeMModel(pl.LightningModule):
         
         out_indices = (3, 4)
 
-        self.bottleneck_dim = 64
+        self.bottleneck_dim = cfg.bottleneck_dim
 
         self.criterion = FocalLossBCE()
 
@@ -685,7 +686,7 @@ predictions[0][1].head(2)
 (preds, results, ids) = list(map(list, zip(*predictions)))
 
 # %% [markdown]
-# ### Save embeddings
+# ### Save predictions
 
 # %% [markdown]
 # #### Save results
@@ -712,12 +713,25 @@ results.study_id.nunique()
 results.instance.dtype
 
 # %%
-results = results.sort_values(by=['study_id', 'series_id', 'instance'], ascending=[True, True, True],ignore_index=True)
-
-results.shape
+#  dont sort
+# table and embeding order must match
 
 # %%
-results[results['study_id'] == '100206310'].head(-40)
+# results = results.sort_values(by=['study_id', 'series_id', 'instance'], ascending=[True, True, True], ignore_index=True)
+
+# results.shape
+
+# %%
+results.study_id.unique()
+
+# %%
+# results.head(5)
+
+# %%
+results.index[results['study_id'] == '1002894806']
+
+# %%
+results[results['study_id'] == '1002894806'].head(-40)
 
 # %%
 results.to_csv(CFG.DEST_FOLDER / 'predictions.csv', index=False)
@@ -728,6 +742,11 @@ results.to_csv(CFG.DEST_FOLDER / 'predictions.csv', index=False)
 # %%
 stacked = np.vstack(preds)
 stacked.shape
+
+# %%
+np.save(CFG.stacked_path / f'stacked.npy', stacked)
+
+# %%
 
 # %%
 for (embeds, ids) in zip(preds, ids):
