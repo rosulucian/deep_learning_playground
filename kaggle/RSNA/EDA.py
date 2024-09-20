@@ -103,6 +103,12 @@ train_desc_df[train_desc_df['id'] == '4003253702807833'].series_description.valu
 pd.crosstab(coords_df.condition, coords_df.series_description)
 
 # %%
+coords_df.study_id.nunique()
+
+# %%
+coords_df.groupby('condition').instance_id.nunique()
+
+# %%
 # get the positive slices
 coords_df.groupby(['study_id','series_id']).instance.unique()
 
@@ -135,6 +141,9 @@ for f in ['condition','level']:
 
 # %%
 files_df.head(3)
+
+# %%
+files_df.groupby('study_id').instance_id.count().agg(['min', 'max', 'mean'])
 
 # %%
 files_df.rows.min(), files_df.rows.max(), files_df['columns'].min(), files_df['columns'].max(), 
@@ -255,6 +264,12 @@ df = files_df[files_df['study_id'] == study]
 df.shape
 
 # %%
+df.series_description.unique()
+
+# %%
+df[df['series_description'] == 'Sagittal T2/STIR'].sort_values(['series_id', 'proj'], ascending=[True, False])[:60]
+
+# %%
 df[df['series_description'] == 'Axial T2'].sort_values(['series_id', 'proj'], ascending=[True, False])[:60]
 
 # %%
@@ -314,14 +329,14 @@ files_df.seriesdescription.value_counts(), files_df.seriesdescription.isna().sum
 files_df.sample(1)
 
 # %%
-coords_df.plane.unique()
+coords_df.series_description.unique(), files_df.seriesdescription.unique()
 
 # %%
-coords_df[(coords_df['study_id'] == 1883368654) & (coords_df['plane'] == 'Sagittal T1')].sample()
+coords_df[(coords_df['study_id'] == 1883368654) & (coords_df['series_description'] == 'Sagittal T1')].sample()
 
 
 # %% [markdown]
-# #### Image orientations
+# #### Patient position
 
 # %%
 def get_dcoms(study_id, source=CFG.IMAGES_DIR):
@@ -381,6 +396,12 @@ ffs = files_df[files_df['patientposition'] == 'FFS'].sample(1).study_id.values[0
 hfs, ffs
 
 # %%
+study = 665627263
+files = get_dcoms(ffs)
+
+plot_dcom(files)
+
+# %%
 files = get_dcoms(ffs)
 plot_dcom(files, title='ffs')
 
@@ -419,34 +440,51 @@ def plot_series(study_id, source=CFG.IMAGES_DIR):
     plot_dcom(files, title=f'{series_id} {len(files)} images')
 
 def plot_df(df, source=CFG.IMAGES_DIR):
-    series_id = files_df[files_df['study_id'] == study_id].sample(1).series_id.values[0]
-
-    imgs = df.image.to_list()
-    # imgs.sort()
-
-    files = [source / str(study_id) / str(series_id) / f'{image}.dcm' for image in imgs]
+    files = [source / str(row.study_id) / str(row.series_id) / f'{row.image}.dcm' for _, row in df.iterrows()]
 
     plot_dcom(files, title=f'{series_id} {len(files)} images')
-    
 
 
 # %%
 study = 1018005303
-df[df['series_description'] == 'Axial T2'].sort_values(['proj'], ascending=[False])[:60]
+df = files_df[files_df['study_id'] == study]
+
+df = df[df['series_description'] == 'Axial T2'].sort_values(['proj'], ascending=[False])[:60]
 
 plot_df(df)
 
 # %%
-study_id = 29931867
+hfs = files_df[files_df['patientposition'] == 'HFS'].sample(1).study_id.values[0]
+ffs = files_df[files_df['patientposition'] == 'FFS'].sample(1).study_id.values[0]
 
-print(files_df[files_df['study_id'] == study_id].sample(1).patientposition.values[0])
-
-plot_series(study_id)
-
-# %%
+hfs, ffs
 
 # %%
+df = files_df[files_df['study_id'] == hfs]
+
+df = df[df['series_description'] == 'Sagittal T1'].sort_values(['proj'], ascending=[False])[:60]
+
+plot_df(df)
 
 # %%
+df = files_df[files_df['study_id'] == hfs]
+
+df = df[df['series_description'] == 'Sagittal T1'].sort_values(['proj'], ascending=[True])[:60]
+
+plot_df(df)
+
+# %%
+df = files_df[files_df['study_id'] == ffs]
+
+df = df[df['series_description'] == 'Sagittal T1'].sort_values(['proj'], ascending=[False])[:60]
+
+plot_df(df)
+
+# %%
+df = files_df[files_df['study_id'] == ffs]
+
+df = df[df['series_description'] == 'Sagittal T1'].sort_values(['proj'], ascending=[True])[:60]
+
+plot_df(df)
 
 # %%
