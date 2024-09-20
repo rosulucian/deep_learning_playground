@@ -85,7 +85,7 @@ class rsna_dataset(torch.utils.data.Dataset):
         return img, target
 
 class rsna_lstm_dataset(torch.utils.data.Dataset):
-    def __init__(self, train_df, files_df, embeds_path):
+    def __init__(self, train_df, train_desc_df, embeds_path):
         super().__init__()
 
         # self.cfg = cfg
@@ -95,7 +95,7 @@ class rsna_lstm_dataset(torch.utils.data.Dataset):
         self.studies = train_df.study_id.unique().tolist()
         self.len = train_df.study_id.nunique()
 
-        self.files_df = files_df
+        self.train_desc_df = train_desc_df
 
     def __len__(self):
         return self.len
@@ -104,19 +104,47 @@ class rsna_lstm_dataset(torch.utils.data.Dataset):
         entry = self.train_df.iloc[index]
         study_id = entry.study_id
 
-        files_df = self.files_df[self.files_df.study_id == study_id]
+        df = self.train_desc_df[self.train_desc_df.study_id == study_id]
+        df = df.sort_values('series_description', ascending=False)
 
-        files = []
+        files = df.ss_id.tolist()
 
-        # TODO: ieterate over list of series_description to ensure order
-        for name, group in files_df.sort_values('proj').groupby('series_description'):
-            files += group.instance_id.to_list()
-
-        # files = [self.cfg.embeds_path / f'{f}.npy' for f in files]
         files = [self.embeds_path / f'{f}.npy' for f in files]
 
         embeds = [np.load(f) for f in files]
-        embeds = np.stack(embeds)
+        embeds = np.concatenate(embeds)
+        
+        targets = torch.tensor(entry.values.flatten().tolist()[1:])
+        # targets = F.one_hot(targets).T
+
+        return torch.from_numpy(embeds), targets
+
+class rsna_lstm_dataset2(torch.utils.data.Dataset):
+    def __init__(self, train_df, train_desc_df, embeds_path):
+        super().__init__()
+
+        # self.cfg = cfg
+        self.embeds_path = embeds_path
+        self.embeds = np.load(self.embeds_path / 'stacked.npy')
+
+        self.train_df = train_df
+        self.studies = train_df.study_id.unique().tolist()
+        self.len = train_df.study_id.nunique()
+
+        self.train_desc_df = train_desc_df
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, index: int):
+        entry = self.train_df.iloc[index]
+        study_id = entry.study_id
+
+        df = self.train_desc_df[self.train_desc_df.study_id == study_id]
+        df = df.sort_values(['series_description', 'proj'], ascending=[False, True])
+
+        idx = df.index.to_list()
+        embeds = self.embeds[idx]
         
         targets = torch.tensor(entry.values.flatten().tolist()[1:])
         # targets = F.one_hot(targets).T
