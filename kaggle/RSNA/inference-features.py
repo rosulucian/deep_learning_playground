@@ -734,6 +734,9 @@ results.index[results['study_id'] == '1002894806']
 results[results['study_id'] == '1002894806'].head(-40)
 
 # %%
+results[results.pred_H > 0.8].shape, results[results.pred_H < 0.8].shape
+
+# %%
 results.to_csv(CFG.DEST_FOLDER / 'predictions.csv', index=False)
 
 # %% [markdown]
@@ -749,30 +752,21 @@ np.save(CFG.stacked_path / f'stacked.npy', stacked)
 # %%
 
 # %%
-for (embeds, ids) in zip(preds, ids):
-    for emb, file in zip(embeds, ids):
-        np.save(CFG.embeds_path / f'{file}.npy', emb)
-        # print(CFG.embeds_path / f'{file}.npy')
+# for (embeds, ids) in zip(preds, ids):
+#     for emb, file in zip(embeds, ids):
+#         np.save(CFG.embeds_path / f'{file}.npy', emb)
 
 # %%
-for x, y in results.groupby(['study_id', 'series_id']):
-# for x, y in results.loc[:40].groupby(['study_id', 'series_id']):
-    # print(x,type(y))
-    
-    filename = CFG.stacked_path / f'{x[0]}_{x[1]}.npy'
+# for x, y in results.groupby(['study_id', 'series_id']):   
+#     filename = CFG.stacked_path / f'{x[0]}_{x[1]}.npy'
 
-    files = [CFG.embeds_path / f'{file}.npy' for file in y.ids.tolist()]
+#     files = [CFG.embeds_path / f'{file}.npy' for file in y.ids.tolist()]
 
-    files = [np.load(f) for f in files]
+#     files = [np.load(f) for f in files]
 
-    # print(len(files), files[0].shape)
+#     stacked = np.vstack(files)
 
-    stacked = np.vstack(files)
-
-    np.save(filename, stacked)
-    
-    # print(stacked.shape, filename)
-    # print(len(y.ids.tolist()))
+#     np.save(filename, stacked)
 
 # %%
 
