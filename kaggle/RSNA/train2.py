@@ -104,12 +104,13 @@ train_dir = Path('E:\data\RSNA2024')
 class CFG:
 
     project = 'rsna-2'
-    comment = 'bottleneck'
+    comment = '128neck'
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
 
     image_size = 256
+    bottleneck_dim = 128
     
     ROOT_FOLDER = train_dir
     IMAGES_DIR = ROOT_FOLDER / 'train_images'
@@ -129,7 +130,7 @@ class CFG:
     MIXUP = False
 
     ### training
-    BATCH_SIZE = 128
+    BATCH_SIZE = 32
     
     ### Optimizer
     N_EPOCHS = 10
@@ -472,7 +473,7 @@ class GeMModel(pl.LightningModule):
         
         out_indices = (3, 4)
 
-        self.bottleneck_dim = 64
+        self.bottleneck_dim = cfg.bottleneck_dim
 
         self.criterion = FocalLossBCE()
 
@@ -677,6 +678,12 @@ t_df[t_df['condition'].isin(CFG.classes)].shape, v_df[v_df['condition'].isin(CFG
 t_df = t_df[t_df['condition'].isin(CFG.classes)]
 v_df = v_df[v_df['condition'].isin(CFG.classes)]
 
+# %%
+t_df.shape, v_df.shape
+
+# %%
+69576/128, 3662/128
+
 # %% [markdown]
 # ### Train
 
@@ -756,9 +763,15 @@ wandb.finish()
 x, y = next(iter(dm.train_dataloader()))
 
 # %%
-# foo = model(x)
-foo = model(x.to(CFG.device)).detach().cpu()
+foo = model(x)
+# foo = model(x.to(CFG.device)).detach().cpu()
 foo.shape
+
+# %%
+foo[0]
+
+# %%
+foo[0].sigmoid()
 
 # %%
 macc = tm.classification.MultilabelAccuracy(num_labels=26)
