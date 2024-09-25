@@ -111,11 +111,11 @@ train_dir = Path('E:\data\RSNA2024')
 
 class CFG:
 
-    project = 'lstm'
-    comment = '16l128e'
+    project = 'lstm_new'
+    comment = 'undersample_healthy'
 
     ### model
-    model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
+    model_name = 'lstm' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
 
     image_size = 256
     
@@ -135,6 +135,12 @@ class CFG:
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
 
+    weighted_loss = True
+    class_weights = [2.06762982, 0.42942998, 5.32804575]
+    # class_weights = [1, 0.2, 1.5]
+    
+    num_layers=8
+
     input_dim = 128
     hidden_dim = 128
     target_size = 128
@@ -149,7 +155,7 @@ class CFG:
     BATCH_SIZE = 16
     
     ### Optimizer
-    N_EPOCHS = 10
+    N_EPOCHS = 30
     USE_SCHD = False
     WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
@@ -350,6 +356,9 @@ print(seq.shape, target.shape)
 print(seq.dtype, target.dtype)
 
 # %%
+# preds_df.sample(frac=0.1)
+
+# %%
 # seq dim: (bs, seq_len, 1, num_features)
 # target dim: (N, d1)
 target
@@ -363,6 +372,9 @@ seq[0]
 # %%
 from dataset import rsna_lstm_dataset, rsna_lstm_dataset2, collate_fn_padd
 
+# %%
+train_desc_df.sample()
+
 
 # %%
 # from torch.nn.utils.rnn import pad_sequence
@@ -374,12 +386,14 @@ from dataset import rsna_lstm_dataset, rsna_lstm_dataset2, collate_fn_padd
 #     return features, targets
     
 class lstm_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, train_desc_df, cfg):
+    # def __init__(self, train_df, val_df, train_desc_df, cfg):
+    def __init__(self, train_df, val_df, preds_df, cfg):
         super().__init__()
         
         self.train_df = train_df
         self.val_df = val_df
-        self.train_desc_df = train_desc_df
+        # self.train_desc_df = train_desc_df
+        self.preds_df = preds_df
         
         self.train_bs = cfg.BATCH_SIZE
         self.val_bs = cfg.BATCH_SIZE
@@ -390,7 +404,7 @@ class lstm_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = rsna_lstm_dataset2(self.train_df, self.train_desc_df, self.path)
+        train_ds = rsna_lstm_dataset2(self.train_df, self.preds_df, self.path)
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -406,7 +420,7 @@ class lstm_datamodule(pl.LightningDataModule):
         return train_loader
         
     def val_dataloader(self):
-        val_ds = rsna_lstm_dataset2(self.val_df, self.train_desc_df, self.path)
+        val_ds = rsna_lstm_dataset2(self.val_df, self.preds_df, self.path)
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -476,132 +490,19 @@ class FocalLossBCE(torch.nn.Module):
         bce_loss = self.bce(logits, targets)
         return self.bce_weight * bce_loss + self.focal_weight * focall_loss
 
-class GeM(torch.nn.Module):
-    def __init__(self, p=3, eps=1e-6):
-        super(GeM, self).__init__()
-        self.p = torch.nn.Parameter(torch.ones(1) * p)
-        self.eps = eps
 
-    def forward(self, x):
-        bs, ch, h, w = x.shape
-        x = torch.nn.functional.avg_pool2d(x.clamp(min=self.eps).pow(self.p), (x.size(-2), x.size(-1))).pow(
-            1.0 / self.p)
-        x = x.view(bs, ch)
-        return x
-
+# %%
+# logprobs = F.cross_entropy(input, target, reduction='none')
+# at = at.view(-1, len(alphas))
+# pt = torch.exp(-logprobs)
+# focal_loss = at*(1-pt)** gamma * logprobs
+# return focal_loss.mean()
 
 # %% [markdown]
 # ### Model
 
 # %% [markdown]
 # #### Definition
-
-# %%
-# class LSTMClassifier(pl.LightningModule):
-#     def __init__(self, cfg=CFG):
-#         super(LSTMClassifier, self).__init__()
-
-#         self.cfg = cfg
-        
-#         self.input_dim = cfg.input_dim
-#         self.hidden_dim = cfg.hidden_dim
-#         self.target_size = cfg.target_size
-
-#         # https://discuss.pytorch.org/t/pytorchs-non-deterministic-cross-entropy-loss-and-the-problem-of-reproducibility/172180/9
-#         # reduction is set to none
-#         self.criterion = torch.nn.CrossEntropyLoss(reduction='none')
-
-#         self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=16, batch_first=True)
-#         self.fc = nn.Linear(self.hidden_dim, self.target_size)
-#         self.classifiers = torch.nn.ModuleList([nn.Linear(self.target_size, cfg.N_LABELS) for i in range(25)])
-
-#         # no average maccs
-#         macc_serverity = ClasswiseWrapper(MulticlassAccuracy(
-#             num_classes=self.cfg.N_LABELS,
-#             average='none', 
-#             multidim_average='global'
-#             # label encoder classes
-#         ), labels=le.classes_, prefix='multiacc_severity/')
-
-#         macc_levels = ClasswiseWrapper(MulticlassAccuracy(
-#             num_classes=self.cfg.N_LABELS,
-#             average='none', 
-#             multidim_average='global'
-#         ), labels=classes, prefix='multiacc_levels/')
-        
-#         metrics = MetricCollection({
-#             'macc': MulticlassAccuracy(num_classes=self.cfg.N_LABELS),
-#             'macc_none': macc_serverity,
-#             'mpr': MulticlassPrecision(num_classes=self.cfg.N_LABELS),
-#             'mrec': MulticlassRecall(num_classes=self.cfg.N_LABELS),
-#             'f1': MulticlassF1Score(num_classes=self.cfg.N_LABELS)
-#         })
-
-#         self.train_metrics = metrics.clone(prefix='train/')
-#         self.valid_metrics = metrics.clone(prefix='val/')
-
-#     def forward(self, sequence):
-#         #  seq: (seq_len, bs, num_features)
-#         lstm_out, (h, c) = self.lstm(sequence)
-        
-#         y = self.fc(h[-1])
-
-#         preds = [c(y).T for c in self.classifiers]
-#         preds = torch.stack(preds).T
-        
-#         return preds
-
-#     def step(self, batch, batch_idx, mode='train'):
-#         x, y = batch
-
-#         preds = self(x)
-
-#         loss = self.criterion(preds, y)
-
-#         # https://discuss.pytorch.org/t/pytorchs-non-deterministic-cross-entropy-loss-and-the-problem-of-reproducibility/172180/9
-#         loss = loss.mean()
-
-#         # print(preds.shape, y.shape)
-
-#         if mode == 'train':
-#             output = self.train_metrics(preds, y)
-#             self.log_dict(output)
-#         else:
-#             self.valid_metrics.update(preds, y)
-
-#         self.log(f'{mode}/loss', loss, on_step=True, on_epoch=True)
-
-#         return loss
-
-#     def training_step(self, batch, batch_idx):
-#         loss = self.step(batch, batch_idx, mode='train')
-        
-#         return loss
-        
-#     def validation_step(self, batch, batch_idx):
-#         loss = self.step(batch, batch_idx, mode='val')
-    
-#         return loss
-
-#     def on_train_epoch_end(self):
-#         self.train_metrics.reset()
-
-#     def on_validation_epoch_end(self):
-#         output = self.valid_metrics.compute()
-#         self.log_dict(output)
-
-#         self.valid_metrics.reset()
-
-#     def configure_optimizers(self):
-#         optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.LEARNING_RATE, weight_decay=CFG.weight_decay)
-        
-#         if self.cfg.USE_SCHD:
-#             scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.cfg.COS_EPOCHS)
-#             scheduler_warmup = GradualWarmupSchedulerV2(optimizer, multiplier=10, total_epoch=self.cfg.WARM_EPOCHS, after_scheduler=scheduler_cosine)
-
-#             return [optimizer], [scheduler_warmup]
-#         else:
-#             return optimizer
 
 # %%
 CFG.N_LABELS
@@ -626,9 +527,13 @@ class LSTMClassifier(pl.LightningModule):
         # https://discuss.pytorch.org/t/pytorchs-non-deterministic-cross-entropy-loss-and-the-problem-of-reproducibility/172180/9
         # reduction is set to none
         # self.criterion = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.tensor([1,0.1,2]))
-        self.criterion = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.tensor([2.06762982, 0.42942998, 5.32804575]))
+        weight = None
+        if self.cfg.weighted_loss:
+            weight = torch.tensor(cfg.class_weights)
+            
+        self.criterion = torch.nn.CrossEntropyLoss(reduction='none', weight=weight)
 
-        self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=16, batch_first=True)
+        self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=cfg.num_layers, batch_first=True)
         self.fc = nn.Linear(self.hidden_dim, self.levels * self.classes)
         # self.classifiers = torch.nn.ModuleList([nn.Linear(self.target_size, cfg.N_LABELS) for i in range(25)])
 
@@ -729,6 +634,26 @@ seq.shape, seq.view(1, len(seq), -1).shape, target.shape
 target_size = 64
 
 lstm = nn.LSTM(target_size, target_size, num_layers=1, batch_first=True)
+fc = nn.Linear(target_size, target_size)
+classifiers = [nn.Linear(target_size, 3) for i in range(25)]
+
+lstm_out, (h, c) = lstm(torch.randn(5,88,64))
+print(lstm_out.shape, h.shape, c.shape)
+
+y = fc(h[-1])
+print('fc shape:', y.shape)
+
+preds = [c(y).T for c in classifiers]
+print('pred shape:', preds[0].shape)
+
+preds = torch.stack(preds).T
+
+print('preds shape:', preds.shape)
+
+# %%
+target_size = 64
+
+lstm = nn.LSTM(target_size, target_size, num_layers=16, batch_first=True)
 fc = nn.Linear(target_size, target_size)
 classifiers = [nn.Linear(target_size, 3) for i in range(25)]
 
@@ -897,7 +822,7 @@ dm = lstm_datamodule(t_df, v_df, preds_df, cfg=CFG)
 len(dm.train_dataloader()), len(dm.val_dataloader())
 
 # %%
-run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.comment}'
+run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.num_layers}l-{CFG.comment}'
 run_name
 
 # %%
@@ -954,6 +879,8 @@ trainer.fit(model, dm)
 
 # %%
 
+# %%
+
 # %% [markdown]
 # ### Predict
 
@@ -963,12 +890,12 @@ x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape
 
 # %%
-x.shape
-
-# %%
 # pred = model(x.to(CFG.device)).detach().cpu()
 pred = model(x).detach().cpu()
 pred.shape
+
+# %%
+torch.where(y==1, 1, 0)[:3]
 
 # %%
 y
