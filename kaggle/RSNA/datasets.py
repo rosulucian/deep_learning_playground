@@ -252,11 +252,35 @@ files_df.sample(2)
 files_df.shape
 
 # %%
-files_df['cl'] = 'H'
-files_df['condition'] = 'H'
+train_desc_df.series_description.isna().sum(), files_df.series_description.isna().sum()
 
 # %%
-files_df.sample(5)
+# # TODO: set correct values for condition and cl
+# # WTF??? what happened here
+
+# files_df['cl'] = 'H'
+# files_df['condition'] = 'H'
+
+# %%
+coords_df.instance_id.count(), coords_df.drop_duplicates(subset=['instance_id']).instance_id.count()
+
+# %%
+duplicates = coords_df.instance_id.unique().tolist()
+
+len(duplicates)
+
+# %%
+files_df['healthy'] = True
+files_df.loc[files_df.instance_id.isin(duplicates), 'healthy'] = False
+
+# %%
+files_df.healthy.value_counts()
+
+# %%
+files_df.shape, files_df.healthy.isna().sum()
+
+# %%
+files_df.sample()
 
 # %%
 files_df['inst_min'] = files_df.groupby('ss_id')['instancenumber'].transform('min')
@@ -271,8 +295,6 @@ files_df.head(2)
 coords_df = pd.merge(coords_df, files_df[['instance_id','inst_perc']], left_on='instance_id', right_on='instance_id')
 
 coords_df.sample(2)
-
-# %%
 
 # %%
 

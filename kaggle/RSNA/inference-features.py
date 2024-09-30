@@ -216,6 +216,9 @@ coords_df.sample(3)
 files_df.shape, coords_df.shape
 
 # %%
+# files_df.cl.unique()
+
+# %%
 coords_df.instance_id.nunique(), coords_df.filename.nunique()
 
 # %%
@@ -243,10 +246,18 @@ coords_df[coords_df['instance_id'] == inst_id].cl.to_list()
 from dataset import rsna_inf_dataset
 
 # %%
-selection = coords_df[coords_df['condition'].isin(CFG.classes)]
+# test healthy
+dset = rsna_inf_dataset(files_df[files_df.healthy != True], coords_df, CFG)
+
+print(dset.__len__())
+
+img, ids, label, = dset.__getitem__(2)
+print(img.shape)
+print(img.dtype, label)
 
 # %%
-dset = rsna_inf_dataset(selection, CFG)
+# test unhealthy
+dset = rsna_inf_dataset(files_df, coords_df, CFG)
 
 print(dset.__len__())
 
@@ -271,10 +282,12 @@ from dataset import rsna_inf_dataset
 
 # %%
 class inference_datamodule(pl.LightningDataModule):
-    def __init__(self, df, cfg=CFG, tfs=None):
+    def __init__(self, files_df, coords_df, cfg=CFG, tfs=None):
         super().__init__()
         
-        self.df = df
+        self.files_df = files_df
+        self.coords_df = coords_df
+        
         self.bs = cfg.BATCH_SIZE
         self.tfs = tfs
         self.cfg = cfg
@@ -282,7 +295,7 @@ class inference_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def predict_dataloader(self):
-        ds = rsna_inf_dataset(self.df, self.cfg, tfs=self.tfs, mode='train')
+        ds = rsna_inf_dataset(self.files_df, self.coords_df, self.cfg, tfs=self.tfs, mode='train')
         
         train_loader = torch.utils.data.DataLoader(
             ds,
@@ -306,7 +319,7 @@ CFG2 = CFG()
 CFG2.BATCH_SIZE = 16
 CFG2.num_workers = 2
 
-dm = inference_datamodule(t_df, cfg=CFG2)
+dm = inference_datamodule(files_df, t_df, cfg=CFG2)
 
 x, ids, y = next(iter(dm.predict_dataloader()))
 x.shape, len(y), x.dtype,
@@ -339,7 +352,7 @@ val_tfs = A.Compose([
 ])
 
 # %%
-dm = inference_datamodule(t_df, cfg=CFG2, tfs=val_tfs)
+dm = inference_datamodule(files_df, t_df, cfg=CFG2, tfs=val_tfs)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, ids, y = next(iter(dm.predict_dataloader()))
@@ -620,7 +633,7 @@ preds[0]
 results.shape
 
 # %%
-results.head(2)
+results
 
 # %% [markdown]
 # ### Inference
@@ -651,10 +664,15 @@ accelerator
 files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
 
 # %%
-train_cols = ['filename', 'cl', 'condition', 'series_description', 'instance_id']
+train_cols = ['filename', 'healthy', 'series_description', 'instance_id']
 
 # %%
 files_df.loc[:, train_cols].head(2)
+
+# %%
+# files_df.condition.unique()
+
+# %%
 
 # %% [markdown]
 # #### Predict
@@ -663,8 +681,10 @@ files_df.loc[:, train_cols].head(2)
 CFG.BATCH_SIZE, CFG.device
 
 # %%
+# make sure files_df has the correct condition
 # dm = inference_datamodule(healthy_df[:248], tfs=val_tfs)
-dm = inference_datamodule(files_df, tfs=val_tfs)
+dm = inference_datamodule(files_df, coords_df, tfs=val_tfs)
+# dm = inference_datamodule(coords_df, tfs=val_tfs)
 
 # %%
 trainer = pl.Trainer(accelerator=CFG.device)
@@ -710,9 +730,6 @@ results.head(2)
 results.study_id.nunique()
 
 # %%
-results.instance.dtype
-
-# %%
 #  dont sort
 # table and embeding order must match
 
@@ -722,7 +739,7 @@ results.instance.dtype
 # results.shape
 
 # %%
-results.study_id.unique()
+results.study_id.nunique()
 
 # %%
 # results.head(5)
@@ -731,10 +748,16 @@ results.study_id.unique()
 results.index[results['study_id'] == '1002894806']
 
 # %%
-results[results['study_id'] == '1002894806'].head(-40)
+results[results['study_id'] == '1002894806'].head()
 
 # %%
 results[results.pred_H > 0.8].shape, results[results.pred_H < 0.8].shape
+
+# %%
+results[results.H < 1].shape
+
+# %%
+results[results.H < 1].sample(2)
 
 # %%
 results.to_csv(CFG.DEST_FOLDER / 'predictions.csv', index=False)

@@ -133,8 +133,7 @@ class rsna_lstm_dataset2(torch.utils.data.Dataset):
 
         self.preds_df = preds_df
 
-        # self.healthy_frac = 0.2
-        self.healthy_frac = None
+        self.healthy_frac = 0.2
 
     def __len__(self):
         return self.len
@@ -165,11 +164,13 @@ class rsna_lstm_dataset2(torch.utils.data.Dataset):
         return torch.from_numpy(embeds), targets
 
 class rsna_inf_dataset(torch.utils.data.Dataset):
-    def __init__(self, coords_df, cfg, tfs=None, mode='train'):
+    def __init__(self, files_df, coords_df, cfg, tfs=None, mode='train'):
         super().__init__()
         
-        self.df = coords_df
-        self.files = list(coords_df.filename.unique())
+        self.coords_df = coords_df
+        self.files_df = files_df
+        
+        self.files = list(files_df.filename.unique())
         self.len = len(self.files)
 
         self.classes = cfg.classes
@@ -198,14 +199,21 @@ class rsna_inf_dataset(torch.utils.data.Dataset):
         target = np.zeros(self.num_classes, dtype=np.float32)
 
         # labels = self.df[self.df['filename'] ==  filename].cl.to_list()
-        labels = self.df[self.df['filename'] ==  filename].condition.to_list()
+        labels = self.coords_df[self.coords_df['filename'] ==  filename].condition.to_list()
 
         for label in labels:
             target[self.class2id[label]] = 1
+            # if target.sum() < 1:
+            #     target[-1] = 1
+
+        print(self.files_df[self.files_df['filename'] ==  filename].healthy.values[0])
+
+        if self.files_df[self.files_df['filename'] ==  filename].healthy.values[0] == True:
+            target[-1] = 1
 
         target = torch.from_numpy(target).float()
 
-        instance_id = self.df[self.df['filename'] ==  filename].instance_id.values[0]
+        instance_id = self.files_df[self.files_df['filename'] ==  filename].instance_id.values[0]
         
         return img, instance_id, target
         
