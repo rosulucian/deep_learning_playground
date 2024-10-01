@@ -111,13 +111,24 @@ train_dir = Path('E:\data\RSNA2024')
 
 class CFG:
 
-    project = 'lstm_new'
-    comment = '4layers'
+    project = 'rsna-lstm'
+    comment = 'full_frac-bs64'
 
     ### model
     model_name = 'lstm' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
 
     image_size = 256
+
+    healthy_frac = 1
+
+    weighted_loss = True
+    class_weights = [2.06762982, 0.42942998, 5.32804575]
+    # class_weights = [1, 0.2, 1.5]
+    
+    num_layers = 16
+
+     ### training
+    BATCH_SIZE = 64
     
     ROOT_FOLDER = train_dir
     IMAGES_DIR = ROOT_FOLDER / 'train_images'
@@ -135,12 +146,6 @@ class CFG:
     RESULTS_DIR = train_dir / 'results'
     CKPT_DIR = RESULTS_DIR / 'ckpt'
 
-    weighted_loss = True
-    class_weights = [2.06762982, 0.42942998, 5.32804575]
-    # class_weights = [1, 0.2, 1.5]
-    
-    num_layers=64
-
     input_dim = 128
     hidden_dim = 128
     target_size = 128
@@ -150,12 +155,9 @@ class CFG:
     split_fraction = 0.95
 
     MIXUP = False
-
-    ### training
-    BATCH_SIZE = 16
     
     ### Optimizer
-    N_EPOCHS = 30
+    N_EPOCHS = 100
     USE_SCHD = False
     WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
@@ -200,6 +202,9 @@ train_desc_df.head(2)
 
 # %%
 preds_df.head(2)
+
+# %%
+preds_df[preds_df.pred_RSS > 0.8].shape
 
 # %%
 files_df.head(2)
@@ -252,6 +257,11 @@ train_df.iloc[:,1:] = train_df.iloc[:,1:].apply(le.fit_transform)
 
 # %%
 train_df.head(2)
+
+# %%
+arr = train_df.iloc[:, 1:].to_numpy()
+
+(arr == 0).sum(), (arr == 1).sum(), (arr == 2).sum()
 
 # %%
 coords_df.sample(2)
@@ -349,14 +359,44 @@ foo.ss_id.tolist()
 from dataset import rsna_lstm_dataset, rsna_lstm_dataset2
 
 # %%
-dset = rsna_lstm_dataset(train_df, train_desc_df, CFG.stacked_path)
-dset = rsna_lstm_dataset2(train_df, preds_df, CFG.stacked_path)
+# dset = rsna_lstm_dataset(train_df, train_desc_df, CFG.stacked_path)
+dset = rsna_lstm_dataset2(train_df, preds_df, CFG.stacked_path, CFG)
 
 print(dset.__len__())
 
-seq, target = dset.__getitem__(1)
+seq, target = dset.__getitem__(0)
 print(seq.shape, target.shape)
 print(seq.dtype, target.dtype)
+
+# %%
+dset.healthy_frac = 1
+
+print(dset.__len__())
+
+seq, target = dset.__getitem__(0)
+print(seq.shape, target.shape)
+print(seq.dtype, target.dtype)
+
+# %%
+# dset = rsna_lstm_dataset(train_df, train_desc_df, CFG.stacked_path)
+# dset = rsna_lstm_dataset2(train_df, preds_df, CFG.stacked_path)
+dset.healthy_frac = 0
+
+print(dset.__len__())
+
+seq, target = dset.__getitem__(0)
+print(seq.shape, target.shape)
+print(seq.dtype, target.dtype)
+
+# %%
+study_id = train_df.loc[0].study_id
+
+selection = preds_df[preds_df.study_id == study_id]
+
+selection.ids.nunique(), selection.shape
+
+# %%
+selection[selection.pred_H < 0.8].shape, selection[selection.H < 1].shape
 
 # %%
 # preds_df.sample(frac=0.1)
@@ -407,7 +447,7 @@ class lstm_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = rsna_lstm_dataset2(self.train_df, self.preds_df, self.path)
+        train_ds = rsna_lstm_dataset2(self.train_df, self.preds_df, self.path, self.cfg)
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -423,7 +463,7 @@ class lstm_datamodule(pl.LightningDataModule):
         return train_loader
         
     def val_dataloader(self):
-        val_ds = rsna_lstm_dataset2(self.val_df, self.preds_df, self.path)
+        val_ds = rsna_lstm_dataset2(self.val_df, self.preds_df, self.path, self.cfg)
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -454,6 +494,15 @@ dm = lstm_datamodule(t_df, v_df, preds_df, CFG2)
 
 x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
+
+# %%
+# x.shape[0]
+
+# %%
+y[0]
+
+# %%
+y[1]
 
 # %%
 
@@ -530,10 +579,14 @@ class LSTMClassifier(pl.LightningModule):
         self.input_dim = cfg.input_dim
         self.hidden_dim = cfg.hidden_dim
 
+        self.num_layers = cfg.num_layers
+
         self.ignore_index = cfg.ignore_index
         
         self.levels = 25
         self.classes = cfg.N_LABELS
+
+        self.hidden = None
 
         # https://discuss.pytorch.org/t/pytorchs-non-deterministic-cross-entropy-loss-and-the-problem-of-reproducibility/172180/9
         # reduction is set to none
@@ -543,9 +596,10 @@ class LSTMClassifier(pl.LightningModule):
             weight = torch.tensor(cfg.class_weights)
 
         self.focal = FocalLossBCE(bce_weight=1)
-        self.criterion = torch.nn.CrossEntropyLoss(reduction='none', ignore_index=cfg.ignore_index)
+        # self.criterion = torch.nn.CrossEntropyLoss(reduction='none', ignore_index=cfg.ignore_index)
+        self.criterion = torch.nn.CrossEntropyLoss(reduction='none', weight=weight)
 
-        self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=cfg.num_layers, batch_first=True)
+        self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=self.num_layers, batch_first=True)
         self.fc = nn.Linear(self.hidden_dim, self.levels * self.classes)
         self.fc_healthy = nn.Linear(self.hidden_dim, self.levels)
 
@@ -574,9 +628,27 @@ class LSTMClassifier(pl.LightningModule):
         self.train_metrics = metrics.clone(prefix='train/')
         self.valid_metrics = metrics.clone(prefix='val/')
 
+    def init_hidden(self, bsz):
+        weight = next(self.parameters())
+        return (
+            weight.new_zeros(self.num_layers, bsz, self.hidden_dim),
+            weight.new_zeros(self.num_layers, bsz, self.hidden_dim),
+        )
+
     def forward(self, sequence):
+        # weight = next(self.parameters())
+        
+        # h0 = weight.new_zeros(self.num_layers, sequence.shape[0], self.hidden_dim)
+        # c0 = weight.new_zeros(self.num_layers, sequence.shape[0], self.hidden_dim)
+
+        if self.hidden is None:
+            self.hidden = self.init_hidden(sequence.shape[0])
+            
+        self.hidden = (self.hidden[0].detach(), self.hidden[1].detach())
+        
         #  seq: (seq_len, bs, num_features)
-        lstm_out, (h, c) = self.lstm(sequence)
+        # lstm_out, (h, c) = self.lstm(sequence)
+        lstm_out, (h, c) = self.lstm(sequence, self.hidden)
         
         y = self.fc(h[-1])
         y2 = self.fc_healthy(h[-1])
@@ -601,6 +673,8 @@ class LSTMClassifier(pl.LightningModule):
 
         # print(preds.shape, y.shape)
 
+        self.hidden = None
+
         if mode == 'train':
             output = self.train_metrics(preds, y)
             self.log_dict(output)
@@ -615,6 +689,8 @@ class LSTMClassifier(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx, mode='train')
+
+        # self.hidden = None
         
         return loss
         
@@ -781,6 +857,7 @@ preds.shape, preds_healthy.shape
 model.step((seq.view(1, len(seq), -1), target.view(1, len(target))), 0)
 
 # %%
+model = LSTMClassifier(CFG)
 
 # %%
 y, y2 = model(torch.randn(5,88,128))
@@ -843,7 +920,7 @@ dm = lstm_datamodule(t_df, v_df, preds_df, cfg=CFG)
 len(dm.train_dataloader()), len(dm.val_dataloader())
 
 # %%
-run_name = f'{CFG.model_name} {CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.num_layers}l-{CFG.comment}'
+run_name = f'{CFG.LEARNING_RATE} {CFG.N_EPOCHS} eps {CFG.num_layers}l-{CFG.comment}'
 run_name
 
 # %%
