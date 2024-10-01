@@ -716,6 +716,12 @@ results = pd.concat(results, ignore_index=True)
 results.shape
 
 # %%
+results.head()
+
+# %%
+results.head().index.tolist()
+
+# %%
 results.sample(2)
 
 # %%

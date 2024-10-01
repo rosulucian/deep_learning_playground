@@ -120,7 +120,7 @@ class rsna_lstm_dataset(torch.utils.data.Dataset):
         return torch.from_numpy(embeds), targets
 
 class rsna_lstm_dataset2(torch.utils.data.Dataset):
-    def __init__(self, train_df, preds_df, embeds_path):
+    def __init__(self, train_df, preds_df, embeds_path, cfg):
         super().__init__()
 
         # self.cfg = cfg
@@ -133,7 +133,7 @@ class rsna_lstm_dataset2(torch.utils.data.Dataset):
 
         self.preds_df = preds_df
 
-        self.healthy_frac = 0.2
+        self.healthy_frac = cfg.healthy_frac
 
     def __len__(self):
         return self.len
@@ -146,13 +146,14 @@ class rsna_lstm_dataset2(torch.utils.data.Dataset):
 
         # use random healthy slide
         if self.healthy_frac is not None:
-            healthy = df[df['pred_H'] < 0.8]
-            unhealthy = df[df['pred_H'] > 0.8]
-            
+            healthy = df[df['pred_H'] > 0.8]
+            unhealthy = df[df['pred_H'] < 0.8]
+
             healthy = healthy.sample(frac=self.healthy_frac)
 
             df = pd.concat([healthy, unhealthy])
-        
+
+        # sort after concatenating
         df = df.sort_values(['series_description', 'proj'], ascending=[False, True])
 
         idx = df.index.to_list()
