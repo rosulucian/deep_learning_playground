@@ -37,16 +37,19 @@ from torch.nn.utils.rnn import pad_sequence
 
 def collate_fn_padd(data):
     tensors, targets = zip(*data)
+    
     features = pad_sequence(tensors, batch_first=True)
     targets = torch.stack(targets)
+    
     return features, targets
 
 class rsna_dataset(torch.utils.data.Dataset):
-    def __init__(self, coords_df, cfg, tfs=None, mode='train'):
+    def __init__(self, files_df, coords_df, cfg, tfs=None, mode='train'):
         super().__init__()
-        
-        self.df = coords_df
-        self.files = list(coords_df.filename.unique())
+
+        self.files_df = files_df
+        self.coords_df = coords_df
+        self.files = list(files_df.filename.unique())
         self.len = len(self.files)
 
         self.classes = cfg.classes
@@ -74,15 +77,69 @@ class rsna_dataset(torch.utils.data.Dataset):
 
         target = np.zeros(self.num_classes, dtype=np.float32)
 
-        # labels = self.df[self.df['filename'] ==  filename].cl.to_list()
-        labels = self.df[self.df['filename'] ==  filename].condition.to_list()
+        labels = self.coords_df[self.coords_df['filename'] ==  filename].condition.to_list()
 
         for label in labels:
             target[self.class2id[label]] = 1
 
+        # if self.files_df[self.files_df['filename'] ==  filename].healthy.values[0] == True:
+        if len(labels) == 0:
+            target[-1] = 1
+
         target = torch.from_numpy(target).float()
         
         return img, target
+
+class rsna_inf_dataset(torch.utils.data.Dataset):
+    def __init__(self, files_df, coords_df, cfg, tfs=None, mode='train'):
+        super().__init__()
+        
+        self.coords_df = coords_df
+        self.files_df = files_df
+        
+        self.files = list(files_df.filename.unique())
+        self.len = len(self.files)
+
+        self.classes = cfg.classes
+        self.num_classes = len(self.classes)
+
+        self.class2id = {b: i for i, b in enumerate(self.classes)}
+        
+        self.tfs = tfs
+
+        self.mode = mode
+        
+    def __len__(self):
+        return self.len
+    
+    def __getitem__(self, index: int):
+        filename = self.files[index]
+
+        img = np.array(pil.Image.open(filename), dtype=np.float32)
+        img = np.stack([img, img, img], axis = 0)
+
+        if self.tfs is not None:
+            img = img.transpose(1,2,0)
+            img = self.tfs(image=img)['image']
+            img = img.transpose(2,0,1)
+
+        target = np.zeros(self.num_classes, dtype=np.float32)
+        labels = self.coords_df[self.coords_df['filename'] ==  filename].condition.to_list()
+
+        for label in labels:
+            target[self.class2id[label]] = 1
+
+        # print(self.files_df[self.files_df['filename'] ==  filename].healthy.values[0])
+
+        if self.files_df[self.files_df['filename'] ==  filename].healthy.values[0] == True:
+            target[-1] = 1
+
+        target = torch.from_numpy(target).float()
+
+        instance_id = self.files_df[self.files_df['filename'] ==  filename].instance_id.values[0]
+        
+        return img, instance_id, target
+       
 
 class rsna_lstm_dataset(torch.utils.data.Dataset):
     def __init__(self, train_df, train_desc_df, embeds_path):
@@ -154,7 +211,9 @@ class rsna_lstm_dataset2(torch.utils.data.Dataset):
             df = pd.concat([healthy, unhealthy])
 
         # sort after concatenating
-        df = df.sort_values(['series_description', 'proj'], ascending=[False, True])
+        # df = df.sort_values(['series_description', 'proj'], ascending=[False, True])
+        # df = df.sort_values(['series_description', 'proj'], ascending=[False, False])
+        df = df.sort_values(['series_id', 'instance'], ascending=[False, True])
 
         idx = df.index.to_list()
         embeds = self.embeds[idx]
@@ -162,60 +221,5 @@ class rsna_lstm_dataset2(torch.utils.data.Dataset):
         targets = torch.tensor(entry.values.flatten().tolist()[1:])
         # targets = F.one_hot(targets).T
 
-        return torch.from_numpy(embeds), targets
-
-class rsna_inf_dataset(torch.utils.data.Dataset):
-    def __init__(self, files_df, coords_df, cfg, tfs=None, mode='train'):
-        super().__init__()
-        
-        self.coords_df = coords_df
-        self.files_df = files_df
-        
-        self.files = list(files_df.filename.unique())
-        self.len = len(self.files)
-
-        self.classes = cfg.classes
-        self.num_classes = len(self.classes)
-
-        self.class2id = {b: i for i, b in enumerate(self.classes)}
-        
-        self.tfs = tfs
-
-        self.mode = mode
-        
-    def __len__(self):
-        return self.len
-    
-    def __getitem__(self, index: int):
-        filename = self.files[index]
-
-        img = np.array(pil.Image.open(filename), dtype=np.float32)
-        img = np.stack([img, img, img], axis = 0)
-
-        if self.tfs is not None:
-            img = img.transpose(1,2,0)
-            img = self.tfs(image=img)['image']
-            img = img.transpose(2,0,1)
-
-        target = np.zeros(self.num_classes, dtype=np.float32)
-
-        # labels = self.df[self.df['filename'] ==  filename].cl.to_list()
-        labels = self.coords_df[self.coords_df['filename'] ==  filename].condition.to_list()
-
-        for label in labels:
-            target[self.class2id[label]] = 1
-            # if target.sum() < 1:
-            #     target[-1] = 1
-
-        print(self.files_df[self.files_df['filename'] ==  filename].healthy.values[0])
-
-        if self.files_df[self.files_df['filename'] ==  filename].healthy.values[0] == True:
-            target[-1] = 1
-
-        target = torch.from_numpy(target).float()
-
-        instance_id = self.files_df[self.files_df['filename'] ==  filename].instance_id.values[0]
-        
-        return img, instance_id, target
-        
+        return torch.from_numpy(embeds), targets 
         

@@ -297,6 +297,17 @@ coords_df = pd.merge(coords_df, files_df[['instance_id','inst_perc']], left_on='
 coords_df.sample(2)
 
 # %%
+# sort files according to immage
+files_df.sort_values(['study_id', 'series_id', 'image'], ascending=[False, False, True], inplace=True)
+
+# %%
+files_df.head(10)
+
+# %%
+idx1 = files_df.sort_values(['study_id', 'series_id', 'image'], ascending=[False, False, True]).index
+idx2 = files_df.sort_values(['study_id', 'series_id', 'proj'], ascending=[False, False, True]).index
+
+idx1.equals(idx2)
 
 # %% [markdown]
 # ### Save results
@@ -309,5 +320,8 @@ coords_df.to_csv(CFG.DEST_FOLDER / 'train_label_coordinates.csv', index=False)
 
 # %%
 files_df.to_csv(CFG.DEST_FOLDER / 'train_files.csv', index=False)
+
+# %%
+files_df.head(10)
 
 # %%

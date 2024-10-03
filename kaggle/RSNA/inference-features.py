@@ -106,7 +106,7 @@ class CFG:
     project = 'rsna-2'
     comment = 'all-labels'
 
-    ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps 128neck\ep_04_loss_0.17137.ckpt")
+    ckpt_path = Path(r"E:\data\RSNA2024\results\ckpt\eca_nfnet_l0 5e-05 10 eps 128neck\ep_06_loss_0.13010.ckpt")
     embeds_path = Path(r"E:\data\RSNA2024\embeddings")
     stacked_path = Path(r"E:\data\RSNA2024\embeddings_stacked")
 
@@ -311,7 +311,7 @@ class inference_datamodule(pl.LightningDataModule):
 
 
 # %%
-t_df = selection[:-100]
+t_df = coords_df[:-100]
 
 
 CFG2 = CFG()
@@ -703,7 +703,7 @@ predictions[0][2][:4]
 predictions[0][1].head(2)
 
 # %%
-(preds, results, ids) = list(map(list, zip(*predictions)))
+(preds, res, ids) = list(map(list, zip(*predictions)))
 
 # %% [markdown]
 # ### Save predictions
@@ -712,11 +712,8 @@ predictions[0][1].head(2)
 # #### Save results
 
 # %%
-results = pd.concat(results, ignore_index=True)
+results = pd.concat(res, ignore_index=True)
 results.shape
-
-# %%
-results.head()
 
 # %%
 results.head().index.tolist()
@@ -772,6 +769,18 @@ results.to_csv(CFG.DEST_FOLDER / 'predictions.csv', index=False)
 # #### Save embeddings
 
 # %%
+preds[0].shape
+
+# %%
+files_df.head()
+
+# %%
+preds[0][:96, 1]
+
+# %%
+results.iloc[1]
+
+# %%
 stacked = np.vstack(preds)
 stacked.shape
 
@@ -779,6 +788,7 @@ stacked.shape
 np.save(CFG.stacked_path / f'stacked.npy', stacked)
 
 # %%
+# stacked[:2]
 
 # %%
 # for (embeds, ids) in zip(preds, ids):

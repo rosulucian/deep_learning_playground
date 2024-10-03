@@ -227,7 +227,7 @@ coords_df[coords_df['instance_id'] == inst_id].cl.to_list()
 from dataset import rsna_dataset
 
 # %%
-dset = rsna_dataset(coords_df, CFG)
+dset = rsna_dataset(files_df, coords_df, CFG)
 
 print(dset.__len__())
 
@@ -255,12 +255,12 @@ from dataset import rsna_dataset
 
 # %%
 class rsna_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, cfg=CFG, train_tfs=None, val_tfs=None):
+    def __init__(self, train_df, val_df, coords_df, cfg=CFG, train_tfs=None, val_tfs=None):
         super().__init__()
         
         self.train_df = train_df
         self.val_df = val_df
-        # self.coord_df = coord_df
+        self.coords_df = coords_df
         
         self.train_bs = cfg.BATCH_SIZE
         self.val_bs = cfg.BATCH_SIZE
@@ -273,7 +273,7 @@ class rsna_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = rsna_dataset(self.train_df, self.cfg, tfs=self.train_tfs, mode='train')
+        train_ds = rsna_dataset(self.train_df, self.coords_df, self.cfg, tfs=self.train_tfs, mode='train')
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -288,7 +288,7 @@ class rsna_datamodule(pl.LightningDataModule):
         return train_loader
         
     def val_dataloader(self):
-        val_ds = rsna_dataset(self.val_df, self.cfg, tfs=self.val_tfs, mode='val')
+        val_ds = rsna_dataset(self.val_df, self.coords_df, self.cfg, tfs=self.val_tfs, mode='val')
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -313,7 +313,7 @@ CFG2 = CFG()
 CFG2.BATCH_SIZE = 16
 CFG2.num_workers = 2
 
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2)
+dm = rsna_datamodule(t_df, v_df, coords_df, cfg=CFG2)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
@@ -344,7 +344,7 @@ val_tfs = A.Compose([
 ])
 
 # %%
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = rsna_datamodule(t_df, v_df, coords_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
@@ -637,6 +637,9 @@ coords_df.shape
 # %%
 train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.sample(positive_files).loc[:, train_cols]], ignore_index=True)
 train_df.shape
+
+# %%
+train_df.filename.nunique()
 
 # %%
 sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)

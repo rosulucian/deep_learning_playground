@@ -230,14 +230,33 @@ coords_df[coords_df['instance_id'] == inst_id].cl.to_list()
 from dataset import rsna_dataset
 
 # %%
-selection = coords_df[coords_df['condition'].isin(CFG.classes)]
+selection = files_df[files_df['healthy'] == True]
+selection.shape
 
 # %%
-dset = rsna_dataset(selection, CFG)
+
+# %%
+dset = rsna_dataset(selection, coords_df, CFG)
 
 print(dset.__len__())
 
 img, label, = dset.__getitem__(2)
+print(img.shape, label.shape)
+print(img.dtype, label.dtype)
+
+# %%
+label
+
+# %%
+selection = files_df[files_df['healthy'] == False]
+selection.shape
+
+# %%
+dset = rsna_dataset(selection, coords_df, CFG)
+
+print(dset.__len__())
+
+img, label, = dset.__getitem__(0)
 print(img.shape, label.shape)
 print(img.dtype, label.dtype)
 
@@ -261,12 +280,12 @@ from dataset import rsna_dataset
 
 # %%
 class rsna_datamodule(pl.LightningDataModule):
-    def __init__(self, train_df, val_df, cfg=CFG, train_tfs=None, val_tfs=None):
+    def __init__(self, train_df, val_df, coords_df, cfg=CFG, train_tfs=None, val_tfs=None):
         super().__init__()
         
         self.train_df = train_df
         self.val_df = val_df
-        # self.coord_df = coord_df
+        self.coords_df = coords_df
         
         self.train_bs = cfg.BATCH_SIZE
         self.val_bs = cfg.BATCH_SIZE
@@ -279,7 +298,7 @@ class rsna_datamodule(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         
     def train_dataloader(self):
-        train_ds = rsna_dataset(self.train_df, self.cfg, tfs=self.train_tfs, mode='train')
+        train_ds = rsna_dataset(self.train_df, self.coords_df, self.cfg, tfs=self.train_tfs, mode='train')
         
         train_loader = torch.utils.data.DataLoader(
             train_ds,
@@ -294,7 +313,7 @@ class rsna_datamodule(pl.LightningDataModule):
         return train_loader
         
     def val_dataloader(self):
-        val_ds = rsna_dataset(self.val_df, self.cfg, tfs=self.val_tfs, mode='val')
+        val_ds = rsna_dataset(self.val_df, self.coords_df, self.cfg, tfs=self.val_tfs, mode='val')
         
         val_loader = torch.utils.data.DataLoader(
             val_ds,
@@ -320,7 +339,7 @@ CFG2 = CFG()
 CFG2.BATCH_SIZE = 16
 CFG2.num_workers = 2
 
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2)
+dm = rsna_datamodule(t_df, v_df, coords_df, cfg=CFG2)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
@@ -351,7 +370,7 @@ val_tfs = A.Compose([
 ])
 
 # %%
-dm = rsna_datamodule(t_df, v_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = rsna_datamodule(t_df, v_df, coords_df, cfg=CFG2, train_tfs=train_tfs, val_tfs=val_tfs)
 # dm = wav_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 
 x, y = next(iter(dm.train_dataloader()))
@@ -597,73 +616,69 @@ x.shape, foo.shape
 # %%
 
 # %% [markdown]
-# ### Select healthy files
-
-# %%
-# add healthy images
-
-files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
-
-# %%
-# files_df['cl'] = 'H'
-
-# %%
-train_cols = ['filename', 'cl', 'condition', 'series_description']
-
-# %%
-files_df.loc[:, train_cols].head(2)
-
-# %%
-# exclude files with labels
-healthy_df = files_df.loc[:, train_cols]
-healthy_df = pd.merge(healthy_df, coords_df.loc[:, ['filename']],  how='left', on=['filename'], indicator=True)
-
-healthy_df.shape
-
-# %%
-files_df.shape
-
-# %%
-healthy_df['_merge'].value_counts()
-
-# %%
-coords_df.filename.nunique() +  122672
-
-# %%
-healthy_df = healthy_df[healthy_df['_merge'] == 'left_only']
-healthy_df.shape
-
-# %%
-healthy_df.head(2)
-
-# %% [markdown]
 # ### Split
 
 # %%
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
 
 # %%
-positive_files = coords_df.filename.nunique()
-positive_files
+train_cols = ['filename', 'instance_id', 'series_description', 'condition']
 
 # %%
-healthy_df.sample(positive_files).shape
+healthy_df = files_df[files_df.healthy == True]
+healthy_df['condition'] = 'H'
+
+healthy_df.shape
 
 # %%
-coords_df.shape
+healthy_df = healthy_df.sample(frac=.3)
+healthy_df.shape
 
 # %%
-train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.sample(positive_files).loc[:, train_cols]], ignore_index=True)
+healthy_df.head(2)
+
+# %%
+coords_df.head(2)
+
+# %%
+coords_df.loc[:, train_cols].sample(5)
+
+# %%
+healthy_df.loc[:, train_cols].sample(5)
+
+# %%
+train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.loc[:, train_cols]], ignore_index=True)
 train_df.shape
 
 # %%
+train_df.filename.nunique()
+
+# %%
 sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
-train_idx, val_idx = next(sss.split(train_df.filename, train_df.cl))
+train_idx, val_idx = next(sss.split(train_df.filename, train_df.condition))
 
 t_df = train_df.iloc[train_idx]
 v_df = train_df.iloc[val_idx]
 
 t_df.shape, v_df.shape
+
+# %%
+bool(set(t_df.instance_id.tolist()) & set(v_df.instance_id.tolist()))
+
+# %%
+intersection = list(set(t_df.instance_id.tolist()) & set(v_df.instance_id.tolist()))
+len(intersection)
+
+# %%
+intersection[0]
+
+# %%
+coords_df[coords_df.instance_id == '3922074884_1280331258_30']
+
+# %%
+v_df[v_df.instance_id == '3922074884_1280331258_30']
+
+# %%
 
 # %% [markdown]
 # #### Filter classes
@@ -691,7 +706,7 @@ t_df.shape, v_df.shape
 CFG.BATCH_SIZE, CFG.device
 
 # %%
-dm = rsna_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = rsna_datamodule(t_df, v_df, coords_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 len(dm.train_dataloader()), len(dm.val_dataloader())
 
 # %%
