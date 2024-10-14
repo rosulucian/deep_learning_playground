@@ -112,11 +112,14 @@ train_dir = Path('E:\data\RSNA2024')
 class CFG:
 
     project = 'rsna-lstm'
-    comment = 'full_frac-bs64'
+    comment = 'newembeds'
 
     ### model
     model_name = 'lstm' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
 
+    # LEARNING_RATE = 5*1e-5 # best
+    LEARNING_RATE = 1e-5
+    
     image_size = 256
 
     healthy_frac = 1
@@ -125,10 +128,11 @@ class CFG:
     class_weights = [2.06762982, 0.42942998, 5.32804575]
     # class_weights = [1, 0.2, 1.5]
     
-    num_layers = 16
+    num_layers = 4
+    dropout = 0
 
      ### training
-    BATCH_SIZE = 64
+    BATCH_SIZE = 16
     
     ROOT_FOLDER = train_dir
     IMAGES_DIR = ROOT_FOLDER / 'train_images'
@@ -157,13 +161,10 @@ class CFG:
     MIXUP = False
     
     ### Optimizer
-    N_EPOCHS = 100
+    N_EPOCHS = 30
     USE_SCHD = False
     WARM_EPOCHS = 3
     COS_EPOCHS = N_EPOCHS - WARM_EPOCHS
-
-    # LEARNING_RATE = 5*1e-5 # best
-    LEARNING_RATE = 1e-5
     
     weight_decay = 1e-6 # for adamw
 
@@ -210,14 +211,23 @@ preds_df[preds_df.pred_RSS > 0.8].shape
 files_df.head(2)
 
 # %%
+preds_df.shape
+
+# %%
 preds_df = pd.merge(preds_df, train_desc_df.loc[:, ['ss_id', 'series_description']],  how='inner', left_on=['ss_id'], right_on=['ss_id'])
 
 preds_df.sample(2)
 
 # %%
+preds_df.shape
+
+# %%
 preds_df = pd.merge(preds_df, files_df.loc[:, ['instance_id', 'proj']],  how='inner', left_on=['ids'], right_on=['instance_id'])
 
 preds_df.sample(2)
+
+# %%
+preds_df.shape
 
 # %%
 # train_desc_df[train_desc_df['series_id'] == 3909740603]
@@ -351,6 +361,46 @@ foo
 
 # %%
 foo.ss_id.tolist()
+
+# %% [markdown]
+# ### Check input data
+
+# %%
+embeds = np.load(CFG.embeds_path / 'stacked.npy')
+
+# %%
+df = preds_df[preds_df.study_id == 100206310]
+# df = preds_df[preds_df.study_id == 838134337]
+# df = df.sort_values(['series_description', 'proj'], ascending=[False, True])
+
+# %%
+embeds.shape, df.shape
+
+# %%
+idx = df.index.to_list()
+embeds = embeds[idx]
+
+
+# %%
+# idx
+
+# %%
+embeds.shape
+
+# %%
+embeds[:,1]
+
+# %%
+df.head(10)
+
+# %%
+df.tail(10)
+
+# %%
+df.tail(10).index
+
+# %%
+embeds[1]
 
 # %% [markdown]
 # ### Dataset
@@ -599,7 +649,7 @@ class LSTMClassifier(pl.LightningModule):
         # self.criterion = torch.nn.CrossEntropyLoss(reduction='none', ignore_index=cfg.ignore_index)
         self.criterion = torch.nn.CrossEntropyLoss(reduction='none', weight=weight)
 
-        self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=self.num_layers, batch_first=True)
+        self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, num_layers=self.num_layers, batch_first=True, dropout=cfg.dropout)
         self.fc = nn.Linear(self.hidden_dim, self.levels * self.classes)
         self.fc_healthy = nn.Linear(self.hidden_dim, self.levels)
 
@@ -636,19 +686,14 @@ class LSTMClassifier(pl.LightningModule):
         )
 
     def forward(self, sequence):
-        # weight = next(self.parameters())
-        
-        # h0 = weight.new_zeros(self.num_layers, sequence.shape[0], self.hidden_dim)
-        # c0 = weight.new_zeros(self.num_layers, sequence.shape[0], self.hidden_dim)
-
-        if self.hidden is None:
-            self.hidden = self.init_hidden(sequence.shape[0])
+        # if self.hidden is None:
+        #     self.hidden = self.init_hidden(sequence.shape[0])
             
-        self.hidden = (self.hidden[0].detach(), self.hidden[1].detach())
+        # self.hidden = (self.hidden[0].detach(), self.hidden[1].detach())
         
         #  seq: (seq_len, bs, num_features)
-        # lstm_out, (h, c) = self.lstm(sequence)
-        lstm_out, (h, c) = self.lstm(sequence, self.hidden)
+        lstm_out, (h, c) = self.lstm(sequence)
+        # lstm_out, (h, c) = self.lstm(sequence, self.hidden)
         
         y = self.fc(h[-1])
         y2 = self.fc_healthy(h[-1])
@@ -1000,7 +1045,7 @@ pred = pred.detach().cpu()
 pred.shape
 
 # %%
-y
+y[:10]
 
 # %%
 train_df.head()
@@ -1009,8 +1054,9 @@ train_df.head()
 pred.softmax(dim=1)
 
 # %%
-pred.argmax(dim=1)
+pred.argmax(dim=1)[:10]
 
 # %%
+# pred.argmax(dim=1)[:10]
 
 # %%

@@ -199,6 +199,9 @@ preds_df['ss_id'] = preds_df.apply(lambda row: f'{row.study_id}_{row.series_id}'
 train_desc_df.head(2)
 
 # %%
+coords_df.condition.unique()
+
+# %%
 preds_df.head(2)
 
 # %%
@@ -346,12 +349,26 @@ foo.ss_id.tolist()
 from dataset import rsna_lstm_dataset, rsna_lstm_dataset2
 
 # %%
+preds_df[preds_df.RSS > 0].head(15)
+
+# %%
+preds_df['RSS'].unique()
+
+# %%
+preds_df.sample(10)
+
+# %%
+preds_df.instance_id.nunique()
+
+# %%
+
+# %%
 dset = rsna_lstm_dataset(train_df, train_desc_df, CFG.stacked_path)
 dset = rsna_lstm_dataset2(train_df, preds_df, CFG.stacked_path)
 
 print(dset.__len__())
 
-seq, target = dset.__getitem__(1)
+seq, target = dset.__getitem__(10)
 print(seq.shape, target.shape)
 print(seq.dtype, target.dtype)
 
@@ -453,6 +470,13 @@ x, y = next(iter(dm.train_dataloader()))
 x.shape, y.shape, x.dtype, y.dtype
 
 # %%
+x[0]
+
+# %%
+y[0]
+
+# %%
+y[2]
 
 # %%
 del dm
@@ -651,6 +675,9 @@ preds = torch.stack(preds).T
 print('preds shape:', preds.shape)
 
 # %%
+h.shape, c.shape
+
+# %%
 target_size = 64
 
 lstm = nn.LSTM(target_size, target_size, num_layers=16, batch_first=True)
@@ -669,6 +696,9 @@ print('pred shape:', preds[0].shape)
 preds = torch.stack(preds).T
 
 print('preds shape:', preds.shape)
+
+# %%
+h.shape, c.shape
 
 # %%
 target_size = 64

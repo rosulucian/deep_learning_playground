@@ -256,11 +256,9 @@ dset = rsna_dataset(selection, coords_df, CFG)
 
 print(dset.__len__())
 
-img, label, = dset.__getitem__(0)
+img, label, = dset.__getitem__(8)
 print(img.shape, label.shape)
 print(img.dtype, label.dtype)
-
-# %%
 label
 
 # %%

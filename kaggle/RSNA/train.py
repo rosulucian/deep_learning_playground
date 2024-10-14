@@ -84,6 +84,11 @@ def seed_torch(seed):
 # %%
 # TODO: maybe use condition and level for classes
 classes = ['SCS', 'RNFN', 'LNFN', 'LSS', 'RSS'] + ['H'] # add healthy class
+levels = ['L1L2', 'L2L3', 'L3L4', 'L4L5', 'L5S1']
+
+# classes = ['SCS', 'RNFN', 'LNFN'] + ['H'] # add healthy class
+
+# classes = ['LSS', 'RSS'] + ['H'] # add healthy class
 
 # classes = ['SCSL1L2', 'SCSL2L3', 'SCSL3L4', 'SCSL4L5', 'SCSL5S1', 'RNFNL4L5',
 #        'RNFNL5S1', 'RNFNL3L4', 'RNFNL1L2', 'RNFNL2L3', 'LNFNL1L2',
@@ -93,19 +98,21 @@ classes = ['SCS', 'RNFN', 'LNFN', 'LSS', 'RSS'] + ['H'] # add healthy class
 
 num_classes = len(classes)
 class2id = {b: i for i, b in enumerate(classes)}
+level2id = {b: i for i, b in enumerate(levels)}
 
 # %%
 train_dir = Path('E:\data\RSNA2024')
 
 class CFG:
 
-    project = 'rsna-local'
-    comment = 'conditions-only'
+    project = 'rsna-2'
+    comment = '128neck'
 
     ### model
     model_name = 'eca_nfnet_l0' # 'resnet34', 'resnet200d', 'efficientnet_b1_pruned', 'efficientnetv2_m', efficientnet_b7 
 
     image_size = 256
+    bottleneck_dim = 128
     
     ROOT_FOLDER = train_dir
     IMAGES_DIR = ROOT_FOLDER / 'train_images'
@@ -125,7 +132,7 @@ class CFG:
     MIXUP = False
 
     ### training
-    BATCH_SIZE = 128
+    BATCH_SIZE = 32
     
     ### Optimizer
     N_EPOCHS = 10
@@ -195,8 +202,6 @@ coords_df.instance_id.nunique(), coords_df.ss_id.nunique(), files_df.shape[0]
 coords_df.sample(3)
 
 # %%
-
-# %%
 files_df.shape, coords_df.shape
 
 # %%
@@ -219,6 +224,7 @@ coords_df[coords_df['instance_id'] == inst_id].cl.to_list()
 # list(coords_df.filename.unique())
 
 # %%
+coords_df.level.unique()
 
 # %% [markdown]
 # ### Dataset
@@ -227,7 +233,13 @@ coords_df[coords_df['instance_id'] == inst_id].cl.to_list()
 from dataset import rsna_dataset
 
 # %%
-dset = rsna_dataset(files_df, coords_df, CFG)
+selection = files_df[files_df['healthy'] == True]
+selection.shape
+
+# %%
+
+# %%
+dset = rsna_dataset(selection, coords_df, CFG)
 
 print(dset.__len__())
 
@@ -236,6 +248,20 @@ print(img.shape, label.shape)
 print(img.dtype, label.dtype)
 
 # %%
+label
+
+# %%
+selection = files_df[files_df['healthy'] == False]
+selection.shape
+
+# %%
+dset = rsna_dataset(selection, coords_df, CFG)
+
+print(dset.__len__())
+
+img, label, = dset.__getitem__(8)
+print(img.shape, label.shape)
+print(img.dtype, label.dtype)
 label
 
 # %%
@@ -302,11 +328,12 @@ class rsna_datamodule(pl.LightningDataModule):
         
         return val_loader
 
-
 # %%
-t_df = coords_df[:-100]
+
+
+t_df = selection[:-100]
 # t_df = pd.concat([meta_df[:-100], ul_df[:-100]], ignore_index=True)
-v_df = coords_df[-100:]
+v_df = selection[-100:]
 
 CFG2 = CFG()
 # CFG2 = copy.deepcopy(CFG)
@@ -466,16 +493,20 @@ class GeMModel(pl.LightningModule):
         
         out_indices = (3, 4)
 
+        self.bottleneck_dim = cfg.bottleneck_dim
+
         self.criterion = FocalLossBCE()
 
-        wrapped_metric = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multiacc/')
+        wrapped_acc = ClasswiseWrapper(MultilabelAccuracy(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multiacc/')
+        wrapped_f1 = ClasswiseWrapper(MultilabelF1Score(num_labels=self.cfg.N_LABELS, average='none'), labels=classes, prefix='multif1/')
         
         metrics = MetricCollection({
-            'macc': MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
-            'macc_none': wrapped_metric,
+            # 'macc': MultilabelAccuracy(num_labels=self.cfg.N_LABELS),
+            'none_acc': wrapped_acc,
             'mpr': MultilabelPrecision(num_labels=self.cfg.N_LABELS),
             'mrec': MultilabelRecall(num_labels=self.cfg.N_LABELS),
-            'f1': MultilabelF1Score(num_labels=self.cfg.N_LABELS)
+            'f1': MultilabelF1Score(num_labels=self.cfg.N_LABELS),
+            'none_f1': wrapped_f1,
         })
 
         self.train_metrics = metrics.clone(prefix='train/')
@@ -499,13 +530,23 @@ class GeMModel(pl.LightningModule):
         self.mid_features = np.sum(feature_dims)
         
         self.neck = torch.nn.BatchNorm1d(self.mid_features)
-        self.head = torch.nn.Linear(self.mid_features, self.cfg.N_LABELS)
+        self.bottleneck = torch.nn.Linear(self.mid_features, self.bottleneck_dim)
+        self.bottleneck_bn = torch.nn.BatchNorm1d(self.bottleneck_dim)
+        self.head = torch.nn.Linear(self.bottleneck_dim, self.cfg.N_LABELS)
 
-    def forward(self, x):
+    def pre_forward(self, x):
         ms = self.backbone(x)
         
         h = torch.cat([global_pool(m) for m, global_pool in zip(ms, self.global_pools)], dim=1)
         x = self.neck(h)
+        x = self.bottleneck(x)
+        x = self.bottleneck_bn(x)
+
+        return x
+    
+    def forward(self, x):
+        x = self.pre_forward(x)
+
         x = self.head(x)
         
         return x
@@ -568,9 +609,6 @@ class GeMModel(pl.LightningModule):
 model = GeMModel(CFG)
 
 # %%
-model.mid_features
-
-# %%
 foo = model(x)
 
 # %%
@@ -579,63 +617,38 @@ x.shape, foo.shape
 # %%
 
 # %% [markdown]
-# ### Select healthy files
-
-# %%
-# add healthy images
-
-files_df.shape, files_df.filename.nunique(), coords_df.filename.nunique()
-
-# %%
-# files_df['cl'] = 'H'
-
-# %%
-train_cols = ['filename', 'cl', 'condition', 'series_description']
-
-# %%
-files_df.loc[:, train_cols].head(2)
-
-# %%
-# exclude files with labels
-healthy_df = files_df.loc[:, train_cols]
-healthy_df = pd.merge(healthy_df, coords_df.loc[:, ['filename']],  how='left', on=['filename'], indicator=True)
-
-healthy_df.shape
-
-# %%
-files_df.shape
-
-# %%
-healthy_df['_merge'].value_counts()
-
-# %%
-coords_df.filename.nunique() +  122672
-
-# %%
-healthy_df = healthy_df[healthy_df['_merge'] == 'left_only']
-healthy_df.shape
-
-# %%
-healthy_df.head(2)
-
-# %% [markdown]
 # ### Split
 
 # %%
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
 
 # %%
-positive_files = coords_df.filename.nunique()
-positive_files
+train_cols = ['filename', 'instance_id', 'series_description', 'condition']
 
 # %%
-healthy_df.sample(positive_files).shape
+healthy_df = files_df[files_df.healthy == True]
+healthy_df['condition'] = 'H'
+
+healthy_df.shape
 
 # %%
-coords_df.shape
+healthy_df = healthy_df.sample(frac=.3)
+healthy_df.shape
 
 # %%
-train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.sample(positive_files).loc[:, train_cols]], ignore_index=True)
+healthy_df.head(2)
+
+# %%
+coords_df.head(2)
+
+# %%
+coords_df.loc[:, train_cols].sample(5)
+
+# %%
+healthy_df.loc[:, train_cols].sample(5)
+
+# %%
+train_df = pd.concat([coords_df.loc[:, train_cols], healthy_df.loc[:, train_cols]], ignore_index=True)
 train_df.shape
 
 # %%
@@ -643,12 +656,49 @@ train_df.filename.nunique()
 
 # %%
 sss = StratifiedShuffleSplit(n_splits=1, test_size=1-CFG.split_fraction, random_state=CFG.random_seed)
-train_idx, val_idx = next(sss.split(train_df.filename, train_df.cl))
+train_idx, val_idx = next(sss.split(train_df.filename, train_df.condition))
 
 t_df = train_df.iloc[train_idx]
 v_df = train_df.iloc[val_idx]
 
 t_df.shape, v_df.shape
+
+# %%
+bool(set(t_df.instance_id.tolist()) & set(v_df.instance_id.tolist()))
+
+# %%
+intersection = list(set(t_df.instance_id.tolist()) & set(v_df.instance_id.tolist()))
+len(intersection)
+
+# %%
+intersection[0]
+
+# %%
+coords_df[coords_df.instance_id == '3922074884_1280331258_30']
+
+# %%
+v_df[v_df.instance_id == '3922074884_1280331258_30']
+
+# %%
+
+# %% [markdown]
+# #### Filter classes
+
+# %%
+CFG.classes
+
+# %%
+t_df[t_df['condition'].isin(CFG.classes)].shape, v_df[v_df['condition'].isin(CFG.classes)].shape
+
+# %%
+t_df = t_df[t_df['condition'].isin(CFG.classes)]
+v_df = v_df[v_df['condition'].isin(CFG.classes)]
+
+# %%
+t_df.shape, v_df.shape
+
+# %%
+69576/128, 3662/128
 
 # %% [markdown]
 # ### Train
@@ -657,7 +707,7 @@ t_df.shape, v_df.shape
 CFG.BATCH_SIZE, CFG.device
 
 # %%
-dm = rsna_datamodule(t_df, v_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
+dm = rsna_datamodule(t_df, v_df, coords_df, cfg=CFG, train_tfs=train_tfs, val_tfs=val_tfs)
 len(dm.train_dataloader()), len(dm.val_dataloader())
 
 # %%
@@ -729,9 +779,15 @@ wandb.finish()
 x, y = next(iter(dm.train_dataloader()))
 
 # %%
-# foo = model(x)
-foo = model(x.to(CFG.device)).detach().cpu()
+foo = model(x)
+# foo = model(x.to(CFG.device)).detach().cpu()
 foo.shape
+
+# %%
+foo[0]
+
+# %%
+foo[0].sigmoid()
 
 # %%
 macc = tm.classification.MultilabelAccuracy(num_labels=26)

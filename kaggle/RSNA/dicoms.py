@@ -80,6 +80,10 @@ ds = dicom.dcmread(files[idx+2])
 print(ds)
 
 # %%
+# ds = dicom.dcmread(files[idx+4])
+# print(ds)
+
+# %%
 ds.get_item('PhotometricInterpretation').keyword, ds.get_item('PhotometricInterpretation').tag
 
 # %%
@@ -228,6 +232,8 @@ for f in tqdm(files[65:68]):
 shutil.rmtree(str(CFG.OUTPUT_DIR))
 os.makedirs(str(CFG.OUTPUT_DIR), exist_ok=True)
 
+
+# %%
 
 # %%
 def process(f, size=CFG.size, save_folder=str(CFG.OUTPUT_DIR), extension="png"):
