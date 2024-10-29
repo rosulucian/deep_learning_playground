@@ -946,6 +946,65 @@ Review sentiment: {sentiment}
 response = get_completion(prompt, temperature=0.7)
 print(response)
 
+# %% [markdown]
+# # Transforming
+
+# %% [markdown]
+# Other classical language processing tasks:
+# * translation
+# * format conversion
+# * spellcheck
+# * tone transformation
+
+# %% [markdown]
+# ### Translation
+
+# %%
+prompt = f"""
+Translate the following English text to Romanian: \ 
+```Hi, I would like to order a blender```
+"""
+response = get_completion(prompt)
+print(response)
+
+# %%
+prompt = f"""
+Tell me which language this is: 
+```so keres```
+"""
+response = get_completion(prompt)
+print(response)
+
+# %%
+prompt = f"""
+Translate the following  text to French and Spanish
+and pirate English and romany: \
+```I want to order a basketball```
+"""
+response = get_completion(prompt)
+print(response)
+
+# %%
+prompt = f"""
+Translate the following text to Spanish in both the \
+formal and informal forms: 
+'Would you like to order a pillow?'
+"""
+response = get_completion(prompt)
+print(response)
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
 # %%
 
 # %% [markdown]
@@ -1002,10 +1061,11 @@ def collect_messages(_):
     panels.append(
         pn.Row('User:', pn.pane.Markdown(prompt, width=600)))
     panels.append(
-        pn.Row('Assistant:', pn.pane.Markdown(response, width=600, styles={'background-color': '#F6F6F6'})))
-        
+        # pn.Row('Assistant:', pn.pane.Markdown(response, width=600, styles={'background-color': '#F6F6F6'})))
+        pn.Row('Assistant:', pn.pane.Markdown(response, width=600)))
  
     return pn.Column(*panels)
+
 
 
 # %%
@@ -1060,6 +1120,15 @@ dashboard = pn.Column(
 dashboard
 
 # %%
+messages =  context.copy()
+messages.append(
+{'role':'system', 'content':'create a json summary of the previous food order. Itemize the price for each item\
+ The fields should be 1) pizza, include size 2) list of toppings 3) list of drinks, include size   4) list of sides include size  5)total price '},    
+)
+ #The fields should be 1) pizza, price 2) list of toppings 3) list of drinks, include size include price  4) list of sides include size include price, 5)total price '},    
+
+response = get_completion_from_messages(messages, temperature=0)
+print(response)
 
 # %%
 
