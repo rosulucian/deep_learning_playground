@@ -1,0 +1,36 @@
+name: llm
+channels:
+- defaults
+- conda-forge
+- jamespreed
+dependencies:
+- anaconda=custom
+- conda-minify=0.*
+- mkl_random=1.*
+- libxslt=1.*
+- mkl_fft=1.*
+- pynacl=1.*
+- jupytext=1.*
+- unidecode=1.*
+- sentence-transformers=3.*
+- aiohappyeyeballs=2.*
+- libclang=14.*
+- libsodium=1.*
+- langchain=0.*
+- libjpeg-turbo=2.*
+- pyasn1-modules=0.*
+- python=3.12
+- m2w64-libwinpthread-git=5.*
+- krb5=1.*
+- timm=1.*
+- pip:
+  - langchain-pinecone==0.*
+  - authlib==1.*
+  - grpcio-health-checking==1.*
+  - aiosqlite==0.*
+  - validators==0.*
+  - html2text==2024.*
+  - litellm==1.*
+  - playwright-stealth==1.*
+  - grpcio-tools==1.*
+  - weaviate-client==4.*
